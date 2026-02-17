@@ -1,0 +1,130 @@
+---
+title: "Results testing"
+author: "Leonardo Souto Ferreira"
+date: today
+format: html
+knitr:
+  opts_knit:
+    root.dir: "/home/leonardo/Doutorado/humidity_malaria_update/"
+geometry:
+  - margin=2cm
+warning: false
+message: false
+echo: false
+fig-width: 8
+fig-height: 6
+---
+
+
+
+
+```{r, fig.width = 8, fig.height = 6, message = FALSE}
+source("R/simulation_functions.R")
+source("R/cleaning_profile_results.R")
+source("R/run_manifest.R")
+source("R/mcap.R")
+library(future.apply)
+```
+
+
+```{r}
+result <- read_csv("aggregated_results/profile_Ahmedabad_hadISD_1997_2011_8_9.csv") |>
+  filter(mode == "refined_second", rho >= 0.01) |>
+  select(-mode, -profile_var, -source_file)
+
+result |>
+  arrange(desc(loglik)) |>
+  head(n = 1) |>
+  as.data.frame()
+
+params <- get_top_sample(result)
+
+params |>
+  predict_model("Ahmedabad",
+    n_sims = 1000,
+    model = "inf_exponent", covariate = "hadISD",
+    start_year = 1997, start_month = 1,
+    end_year = 2011, end_month = 12,
+    end_year_prediction = 2023, end_month_prediction = 12,
+    window_start = 8, window_end = 9,
+    dataset = "data/Ahmedabad/dataset_Ahmedabad_2023.csv"
+  ) |>
+  plot_prediction()
+
+params["scaled_b"] <- 1
+
+plan(multicore, workers = 26)
+
+### allocating the slower ones first speeds up a little (because they start earlier duh)
+grid <- expand.grid(window = rev(2:14), rep = 1:10, KEEP.OUT.ATTRS = FALSE)
+
+res <- foreach(
+  i = seq_len(nrow(grid)),
+  .combine = dplyr::bind_rows,
+  .options.future = list(seed = TRUE, packages = c("dplyr", "purrr"))
+) %dofuture% {
+  w <- grid$window[i]
+
+  result <- params |>
+    prediction_by_window(
+      city = "Ahmedabad", n_sims = 1000,
+      model = "inf_exponent_scaled", covariate = "hadISD",
+      start_year = 1997, start_month = 1,
+      end_year = 2011, end_month = 12,
+      end_year_prediction = 2023, end_month_prediction = 12,
+      prediction_window = w,
+      window_start = 8, window_end = 9,
+      parameters_to_fit = "scaled_b",
+      dataset = "data/Ahmedabad/dataset_Ahmedabad_2023.csv",
+      output_format = "data.frame", ignore_covid = TRUE,
+      actual_end_year = 2011, actual_end_month = 12
+    )
+
+  result$parameters_prediction |>
+    bind_rows(.id = "year") |>
+    as_tibble() |>
+    mutate(window = w, rep = grid$rep[i])
+}
+
+print(res |> as.data.frame())
+
+write_csv(res, "yearly_prediction_Ahmedabad_hadISD.csv")
+
+# result <- params |>
+#   prediction_by_window(
+#     city = "Ahmedabad", n_sims = 1000,
+#     model = "inf_exponent_scaled", covariate = "hadISD",
+#     start_year = 1997, start_month = 1,
+#     end_year = 2011, end_month = 12,
+#     end_year_prediction = 2023, end_month_prediction = 12,
+#     prediction_window = 10,
+#     window_start = 8, window_end = 9,
+#     parameters_to_fit = "scaled_b",
+#     dataset = "data/Ahmedabad/dataset_Ahmedabad_2023.csv", output_format = "data.frame", ignore_covid = TRUE,
+#     actual_end_year = 2011, actual_end_month = 12
+#   )
+# params2 <- result$parameters_prediction
+# print(params2)
+
+
+# result <- params |>
+#   prediction_by_window(
+#     city = "Ahmedabad", n_sims = 1000,
+#     model = "inf_exponent_scaled", covariate = "hadISD",
+#     start_year = 1997, start_month = 1,
+#     end_year = 2011, end_month = 12,
+#     end_year_prediction = 2023, end_month_prediction = 12,
+#     prediction_window = 10,
+#     window_start = 8, window_end = 9,
+#     parameters_to_fit = "scaled_b",
+#     dataset = "data/Ahmedabad/dataset_Ahmedabad_2023.csv", output_format = "data.frame", ignore_covid = TRUE,
+#     actual_end_year = 2011, actual_end_month = 12
+#   )
+
+# params <- result$parameters_prediction |>
+#   bind_rows(.id = "year")
+
+
+
+
+```

@@ -1,0 +1,40 @@
+---
+title: "Results yearly prediction"
+author: "Leonardo Souto Ferreira"
+date: today
+format: html
+knitr:
+  opts_knit:
+    root.dir: "/home/leonardo/Doutorado/humidity_malaria_update/"
+geometry:
+  - margin=2cm
+warning: false
+message: false
+echo: false
+fig-width: 8
+fig-height: 6
+---
+
+
+
+
+```{r, fig.width = 8, fig.height = 6, message = FALSE}
+source("R/simulation_functions.R")
+source("R/cleaning_profile_results.R")
+source("R/run_manifest.R")
+source("R/mcap.R")
+library(future.apply)
+```
+
+```{r}
+result <- read_csv("aggregated_results/yearly_prediction_Ahmedabad_hadISD.csv")
+
+head(result)
+
+result |> ggplot(aes(x = year + 2010, y = scaled_b, group = rep)) +
+  facet_wrap(~window) +
+  geom_line() +
+  theme_bw(12)
+
+
+```

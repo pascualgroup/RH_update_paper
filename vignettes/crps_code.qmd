@@ -1,0 +1,397 @@
+---
+title: "Report"
+author: "Leonardo Souto Ferreira"
+date: today
+toc: true
+warning: false
+echo: false
+format: html
+knitr:
+  opts_knit:
+    root.dir: "/home/leonardo/Doutorado/humidity_malaria_update/"
+---
+
+```{r, message = F}
+source("R/simulation_functions.R")
+source("R/mcap.R")
+source("R/cleaning_profile_results.R")
+
+
+library(ggpubr)
+library(sf)
+library(patchwork)
+library(basemaps)
+library(ggspatial)
+## Transmission model
+```
+
+
+```{r, eval = T}
+df <- read_csv("aggregated_results/yearly_prediction_Ahmedabad_hadISD.csv")
+
+library(fitdistrplus)
+library(scoringRules)
+fit_crps <- function(df) {
+  observation <- df |>
+    filter(type == "data") |>
+    pull(PF)
+  observation <- observation[1]
+  prediction <- df |>
+    filter(type != "data") |>
+    pull(PF)
+  fit <- fitdist(prediction, "nbinom")
+  size <- coef(fit)[1]
+  mu <- coef(fit)[2]
+
+  crps_res <- crps_nbinom(observation, size = size, mu = mu)
+  return(crps_res |> unlist())
+}
+
+fit_crps_sample <- function(df, covariate, window_start, window_end, prediction_window, city) {
+  dat_df <- str_glue("data/{city}/dataset_{city}_2023.csv")
+
+  result <- df |>
+    simulate_yearly_prediction(
+      city = city,
+      n_sims = 1000,
+      model = "inf_exponent_scaled", covariate = covariate,
+      start_year = 1997, start_month = 1,
+      end_year = 2011, end_month = 12,
+      end_year_prediction = 2023, end_month_prediction = 12,
+      prediction_window = prediction_window,
+      window_start = window_start, window_end = window_end,
+      dataset = dat_df, output_format = c("data.frame", "pomps"), ignore_covid = TRUE,
+      actual_end_year = 2011, actual_end_month = 12
+    )
+
+  ignore_covid <- result$ignore_covid
+  training <- result$training$training |>
+    mutate(type = if_else(.id == "data", "data", "training"))
+
+  prediction <- result$prediction |>
+    bind_rows() |>
+    mutate(type = if_else(.id == "data", "data", "prediction"))
+
+  # print(prediction, n = 1000)
+
+  dataset <- rbind(training, prediction)
+  res <- dataset |> filter(type == "data")
+  max_res <- max(res$PF)
+  training <- dataset |> filter(type == "training")
+
+  # print(result$complete_data)
+  complete_data <- result$complete_data |>
+    dplyr::select(time, PF) |>
+    mutate(type = "data")
+  # if (ignore_covid) {
+  dataset <- dataset |>
+    dplyr::select(time, PF, type) |>
+    dplyr::filter(type != "data") |>
+    rbind(complete_data) |>
+    arrange(time, type) |>
+    mutate(covid = if_else(floor(time) == 2020 & type == "data", "sim", "nao"))
+
+  result_crps <- dataset |>
+    dplyr::filter(time >= 2012) |>
+    split(~time) |>
+    lapply(fit_crps) |>
+    bind_rows(.id = "time") |>
+    mutate(time = as.numeric(time))
+
+  return(result_crps)
+}
+```
+
+```{r}
+result <- read_csv("aggregated_results/profile_Ahmedabad_hadISD_1997_2011_8_9.csv") |>
+  filter(mode == "refined_second", rho >= 0.01) |>
+  dplyr::select(-mode, -profile_var, -source_file)
+
+result |>
+  arrange(desc(loglik)) |>
+  head(n = 1) |>
+  as.data.frame()
+
+params <- get_top_sample(result)
+
+
+fixed_crps <- params |>
+  predict_model("Ahmedabad",
+    n_sims = 1000,
+    model = "inf_exponent", covariate = "hadISD",
+    start_year = 1997, start_month = 1,
+    end_year = 2011, end_month = 12,
+    end_year_prediction = 2023, end_month_prediction = 12,
+    window_start = 8, window_end = 9,
+    dataset = "data/Ahmedabad/dataset_Ahmedabad_2023.csv"
+  ) |>
+  filter(time >= 2012) |>
+  split(~time) |>
+  lapply(fit_crps) |>
+  bind_rows(.id = "time") |>
+  mutate(time = as.numeric(time))
+
+```
+
+
+```{r, eval = TRUE}
+# df_name <- paste0("aggregated_results/yearly_prediction_Ahmedabad_hadISD.csv")
+all_res <- c()
+for (i in 2:14) {
+  df_name <- paste0("aggregated_results/yearly_prediction_Ahmedabad_hadISD.csv")
+  if (file.exists(df_name)) {
+    df <- read_csv(df_name)
+    df2 <- df |> filter(window == i)
+    res <- df2 |>
+      # dplyr::filter(sample <= 5) |>
+      split(~rep) |>
+      lapply(fit_crps_sample, covariate = "hadISD", window_start = 8, window_end = 9, prediction_window = i, city = "Ahmedabad") |>
+      bind_rows(.id = "sample") |>
+      mutate(window = i)
+
+    all_res <- rbind(all_res, res)
+  }
+}
+
+ahmedabad_hadisd <- all_res |> mutate(city = "Ahmedabad", covariate = "Relative Humidity")
+
+all_res <- all_res |>
+  left_join(fixed_crps |> rename(fixed = size)) |>
+  mutate(diff = fixed - size)
+
+print(all_res)
+
+df <- read_csv(paste0("aggregated_results/yearly_prediction_Ahmedabad_hadISD.csv"))
+
+
+p1 <- df |> ggplot(aes(x = year + 2010, y = scaled_b)) +
+  facet_wrap(~window,
+    ncol = 5,
+    labeller = labeller(
+      window = function(x) paste(x, "years")
+    )
+  ) +
+  stat_summary(
+    fun = median,
+    geom = "line",
+    linewidth = 0.5
+  ) +
+  stat_summary(
+    fun.data = median_hilow,
+    geom = "ribbon",
+    alpha = 0.3
+  ) +
+  geom_vline(
+    xintercept = 2018,
+    linetype = "dashed",
+    linewidth = 0.6,
+    color = "grey30"
+  ) +
+  # annotate(
+  #   "text",
+  #   x = 2018,
+  #   y = Inf,
+  #   label = "Forecast origin",
+  #   vjust = -0.5,
+  #   size = 3
+  # ) +
+  theme_minimal(base_size = 7, base_family = "sans") +
+  theme(
+    axis.line = element_line(color = "black"),
+    legend.position = "none",
+    axis.title.y = ggtext::element_markdown(),
+    plot.margin = margin(0, 0, 0, 0, "cm"),
+    panel.grid.minor = element_blank(),
+    text = element_text(family = "Helvetica")
+  ) +
+  labs(
+    x = "Last year of historical window",
+    y = "Estimated scaling factor",
+    color = ""
+  ) +
+  ylim(c(0, NA))
+
+
+
+all_res |>
+  ggplot(aes(x = time, y = size, color = sample)) +
+  facet_wrap(~window) +
+  geom_line() +
+  theme_bw(16)
+all_res |>
+  ggplot(aes(x = time, y = diff, color = sample)) +
+  facet_wrap(~window) +
+  geom_line() +
+  theme_bw(16)
+
+p3 <- all_res |>
+  # dplyr::filter(floor(time) != 2020) |>
+  dplyr::filter(time < 2019) |>
+  group_by(window, sample) |>
+  summarize(crps = mean(size, na.rm = TRUE)) |>
+  group_by(window) |>
+  summarize(sd = sd(crps), crps = mean(crps)) |>
+  ungroup() |>
+  mutate(includes = "no")
+
+p2 <- all_res |>
+  dplyr::filter(floor(time) != 2020) |>
+  # dplyr::filter(time < 2019) |>
+  group_by(window, sample) |>
+  summarize(crps = mean(size, na.rm = TRUE)) |>
+  group_by(window) |>
+  summarize(sd = sd(crps), crps = mean(crps)) |>
+  ungroup() |>
+  mutate(includes = "yes")
+
+p2 <- rbind(p2, p3) |>
+  mutate(includes = factor(includes,
+    levels = c("yes", "no"),
+    labels = c("Includes 2019-2023", "Excludes 2019-2023")
+  ))
+p2 <- p2 |>
+  ggplot(aes(x = window, y = crps, ymin = crps - sd, ymax = crps + sd)) +
+  facet_wrap(~includes) +
+  geom_point() +
+  geom_pointrange() +
+  theme_minimal(base_size = 7, base_family = "sans") +
+  theme(
+    axis.line = element_line(color = "black"),
+    legend.position = "none",
+    axis.title.y = ggtext::element_markdown(),
+    plot.margin = margin(0, 0, 0, 0, "cm"),
+    panel.grid.minor = element_blank(),
+    text = element_text(family = "Helvetica")
+  ) +
+  labs(
+    x = "Historical window length",
+    y = "CRPS",
+    color = ""
+  ) +
+  xlim(c(2, 14))
+(p1 / p2) + plot_layout(heights = c(1, 1)) + plot_annotation(tag_levels = "A") &
+  theme(
+    # plot.tag = element_text(size = 7, face = "bold"),
+    plot.tag.position = c(0.01, 0.97)
+  )
+
+ggsave("figure4.pdf", units = "mm", width = 180, height = 120, dpi = 1000)
+
+
+# all_res |>
+#   # dplyr::filter(floor(time) != 2020) |>
+#   dplyr::filter(time < 2019) |>
+#   group_by(window, sample) |>
+#   summarize(crps = mean(diff)) |>
+#   group_by(window) |>
+#   summarize(sd = sd(crps), crps = mean(crps)) |>
+#   ungroup() |>
+#   ggplot(aes(x = window, y = crps, ymin = crps - sd, ymax = crps + sd)) +
+#   geom_point() +
+#   geom_errorbar() +
+#   theme_bw(16)
+
+# all_res |>
+#   dplyr::filter(floor(time) != 2020) |>
+#   # dplyr::filter(time < 2019) |>
+#   group_by(window, sample) |>
+#   summarize(crps = mean(diff)) |>
+#   group_by(window) |>
+#   summarize(sd = sd(crps), crps = mean(crps)) |>
+#   ungroup() |>
+#   ggplot(aes(x = window, y = crps, ymin = crps - sd, ymax = crps + sd)) +
+#   geom_point() +
+#   geom_errorbar() +
+#   theme_bw(16)
+
+
+# all_res |>
+#   # dplyr::filter(floor(time) != 2020) |>
+#   dplyr::filter(time < 2019) |>
+#   group_by(window, sample) |>
+#   summarize(crps = mean(diff)) |>
+#   # summarize(crps = mean(size)) |>
+#   ungroup() |>
+#   arrange(crps)
+
+# all_res |>
+#   # dplyr::filter(floor(time) != 2020) |>
+#   dplyr::filter(time < 2019) |>
+#   group_by(window, sample) |>
+#   # summarize(crps = mean(diff)) |>
+#   summarize(crps = mean(size)) |>
+#   ungroup() |>
+#   arrange(crps)
+
+# best_window <- all_res |>
+#   # dplyr::filter(floor(time) != 2020) |>
+#   dplyr::filter(time < 2019) |>
+#   group_by(window, sample) |>
+#   summarize(crps = mean(diff)) |>
+#   # group_by(window, sample) |>
+#   # summarize(crps = mean(size)) |>
+#   group_by(window) |>
+#   summarize(sd = sd(crps), crps = mean(crps)) |>
+#   ungroup() |>
+#   slice_min(crps, n = 1) |>
+#   unlist() |>
+#   as.numeric()
+
+# best_window <- best_window[1]
+
+# best_sample <- all_res |>
+#   # dplyr::filter(floor(time) != 2020) |>
+#   # group_by(window, sample) |>
+#   # summarize(crps = mean(size)) |>
+#   dplyr::filter(time < 2019) |>
+#   group_by(window, sample) |>
+#   summarize(crps = mean(diff)) |>
+#   ungroup() |>
+#   dplyr::filter(window == best_window) |>
+#   dplyr::select(sample, crps) |>
+#   slice_min(crps, n = 1) |>
+#   unlist() |>
+#   as.numeric()
+
+# best_sample <- best_sample[1]
+
+# print(c("hadISD", best_window, best_sample))
+
+
+# best_window <- all_res |>
+#   dplyr::filter(floor(time) != 2020) |>
+#   # dplyr::filter(time < 2019) |>
+#   group_by(window, sample) |>
+#   # summarize(crps = mean(diff)) |>
+#   # group_by(window, sample) |>
+#   summarize(crps = mean(size)) |>
+#   group_by(window) |>
+#   summarize(sd = sd(crps), crps = mean(crps)) |>
+#   ungroup() |>
+#   slice_min(crps, n = 1) |>
+#   unlist() |>
+#   as.numeric()
+
+# best_window <- best_window[1]
+
+# best_sample <- all_res |>
+#   dplyr::filter(floor(time) != 2020) |>
+#   group_by(window, sample) |>
+#   summarize(crps = mean(size)) |>
+#   # dplyr::filter(time < 2019) |>
+#   # group_by(window, sample) |>
+#   # summarize(crps = mean(diff)) |>
+#   ungroup() |>
+#   dplyr::filter(window == best_window) |>
+#   dplyr::select(sample, crps) |>
+#   slice_min(crps, n = 1) |>
+#   unlist() |>
+#   as.numeric()
+
+# best_sample <- best_sample[1]
+
+# print(c("hadISD", best_window, best_sample))
+
+
+```
+

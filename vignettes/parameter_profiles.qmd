@@ -1,0 +1,661 @@
+---
+title: "Correlation and coherence"
+author: "Leonardo Souto Ferreira"
+date: today
+format: html
+toc: TRUE
+execute:
+  message: FALSE
+  warning: FALSE
+  echo: FALSE
+  eval: TRUE
+knitr:
+  opts_knit:
+    root.dir: "/home/leonardo/Doutorado/humidity_malaria_update/"
+geometry:
+  - margin=2cm
+---
+
+```{r, message = F, eval = TRUE}
+library(tidyverse)
+source("R/mcap.R")
+source("R/cleaning_profile_results.R")
+```
+
+
+```{r}
+all_res <- read_csv("aggregated_results/profile_Ahmedabad_hadISD_1997_2011_8_9.csv") |>
+  filter(mode == "refined_second", rho >= 0.01) |>
+  select(-mode, -profile_var, -source_file, -loglik.se, -sample, -flag)
+
+
+k <- 1
+```
+
+```{r, eval = TRUE}
+plot_mcap_binned_2 <- function(dataset, n_quantiles = 20, max_per_bin = 20, diff_LL = NULL, remove_outlier = TRUE, zscore = TRUE) {
+  column_name <- "value"
+  dataset <- dataset[complete.cases(dataset), ]
+  if (!is.null(diff_LL)) {
+    dataset <- dataset |> filter(loglik >= max(loglik) - diff_LL)
+  }
+
+  dataset <- dataset |>
+    bin_by_quantile(column_name, n_quantiles) |>
+    group_by(quantile) |>
+    slice_max(loglik, n = max_per_bin) |>
+    ungroup() |>
+    mutate(mid_val = (start + end) / 2) |>
+    # group_by(mid_val) |>
+    # summarize(loglik = mean(loglik)) |>
+    # ungroup() |>
+    remove_missing()
+
+  if (remove_outlier) {
+    if (zscore) {
+      dataset <- dataset |>
+        mutate(zscore = (!!sym(column_name) - mean(!!sym(column_name))) / (sd(!!sym(column_name)))) |>
+        filter(abs(zscore) <= 2)
+    } else {
+      col_vals <- dataset |> pull(column_name)
+      iqr <- IQR(col_vals)
+      q_min <- quantile(col_vals, 0.25) - 1.5 * iqr
+      q_max <- quantile(col_vals, 0.75) + 1.5 * iqr
+      dataset <- dataset |> filter(!!sym(column_name) >= q_min, !!sym(column_name) <= q_max)
+    }
+  }
+
+  parameter <- dataset |> pull("value")
+  lp <- dataset |> pull("loglik")
+  mcap_res <- mcap(lp, parameter, lambda = 0.75)
+  p <- with(mcap_res, {
+    data_points <- data.frame(
+      parameter = parameter,
+      loglik = lp
+    )
+    if (is.infinite(ci[1])) {
+      ci[1] <- min(data_points$parameter)
+    }
+    if (is.infinite(ci[2])) {
+      ci[2] <- max(data_points$parameter)
+    }
+
+    fit <- fit |>
+      mutate(
+        ci_1 = ci[1],
+        ci_2 = ci[2],
+        delta = delta
+      ) |>
+      as_tibble()
+  })
+  return(p)
+}
+
+filter_per_bin <- function(dataset, n_quantiles = 20, max_per_bin = 20, diff_LL = NULL, remove_outlier = TRUE, zscore = TRUE) {
+  column_name <- "value"
+  dataset <- dataset[complete.cases(dataset), ]
+  if (!is.null(diff_LL)) {
+    dataset <- dataset |> filter(loglik >= max(loglik) - diff_LL)
+  }
+
+  dataset <- dataset |>
+    bin_by_quantile(column_name, n_quantiles) |>
+    group_by(quantile) |>
+    slice_max(loglik, n = max_per_bin) |>
+    ungroup() |>
+    mutate(mid_val = (start + end) / 2) |>
+    # group_by(mid_val) |>
+    # summarize(loglik = mean(loglik)) |>
+    # ungroup() |>
+    remove_missing()
+
+  if (remove_outlier) {
+    if (zscore) {
+      dataset <- dataset |>
+        mutate(zscore = (!!sym(column_name) - mean(!!sym(column_name))) / (sd(!!sym(column_name)))) |>
+        filter(abs(zscore) <= 2)
+    } else {
+      col_vals <- dataset |> pull(column_name)
+      iqr <- IQR(col_vals)
+      q_min <- quantile(col_vals, 0.25) - 1.5 * iqr
+      q_max <- quantile(col_vals, 0.75) + 1.5 * iqr
+      dataset <- dataset |> filter(!!sym(column_name) >= q_min, !!sym(column_name) <= q_max)
+    }
+  }
+}
+
+
+all_res |>
+  select(-delta) |>
+  pivot_longer(-loglik) |>
+  split(~name) |>
+  lapply(plot_mcap_binned_2, max_per_bin = 10) |>
+  bind_rows(.id = "name") |>
+  rename(value = parameter) -> smoothed_curves
+
+```
+
+```{r, fig.height = 20, fig.width = 20, eval = TRUE}
+ci_vals <- smoothed_curves |>
+  select(name, ci_1, ci_2) |>
+  distinct() |>
+  pivot_longer(-name, names_to = "name2") |>
+  rename(ci = value) |>
+  select(-name2)
+
+mle_vals <- all_res |>
+  select(-delta) |>
+  pivot_longer(-loglik) |>
+  group_by(name) |>
+  slice_max(loglik) |>
+  ungroup() |>
+  select(name, value) |>
+  rename(mle = value)
+
+smoothed_curves <- smoothed_curves |>
+  left_join(mle_vals) |>
+  mutate(
+    label = paste(
+      "MLE:", round(mle, digits = 4), paste0("CI: (", paste0(round(ci_1, digits = 4), ",", round(ci_2, digits = 4), ")"))
+    )
+  ) |>
+  group_by(name) |>
+  mutate(,
+    xpos = mean(value),
+    ypos = min(smoothed) - 1
+  )
+
+print(smoothed_curves)
+print(ci_vals)
+print(mle_vals)
+
+smoothed_curves |>
+  select(name, mle, ci_1, ci_2) |>
+  distinct() |>
+  mutate(
+    label = paste(
+      round(mle, digits = 4), paste0("(", paste0(round(ci_1, digits = 4), ",", round(ci_2, digits = 4), ")"))
+    )
+  ) |>
+  mutate(city = "Ahmedabad", covariate = "Relative humidity") |>
+  select(city, covariate, name, label) |>
+  write_csv("figures/Ahmedabad_RH_parameters_profile.csv")
+all_res |>
+  select(-delta) |>
+  pivot_longer(-loglik) |>
+  split(~name) |>
+  lapply(filter_per_bin, max_per_bin = 10) |>
+  bind_rows(.id = "name") |>
+  left_join(smoothed_curves |> select(name, ci_1, ci_2, delta) |> distinct()) |>
+  # filter(loglik >= max(loglik) - delta - 1) |>
+  ggplot(aes(x = value, y = loglik)) +
+  facet_wrap(~name, scales = "free") +
+  geom_point() +
+  geom_line(aes(y = smoothed), data = smoothed_curves, color = "blue") +
+  geom_vline(aes(xintercept = ci), data = ci_vals, linetype = "dashed") +
+  geom_label(aes(label = label, x = xpos, y = ypos), data = smoothed_curves, inherit.aes = FALSE, size = 3) +
+  theme_bw(12, base_family = "sans") +
+  labs(x = "Parameter value", y = "Log-likelihood") +
+  theme(
+    panel.grid.minor = element_blank(),
+    text = element_text(family = "sans")
+  )
+
+all_res |>
+  select(-delta) |>
+  pivot_longer(-loglik) |>
+  split(~name) |>
+  lapply(filter_per_bin, max_per_bin = 10) |>
+  bind_rows(.id = "name") |>
+  filter(name %in% c("b1", "b2", "b3", "b4", "b5", "b6", "bH", "betaOUT", "alpha")) |>
+  left_join(smoothed_curves |> select(name, ci_1, ci_2, delta) |> distinct()) |>
+  # filter(loglik >= max(loglik) - delta - 1) |>
+  ggplot(aes(x = value, y = loglik)) +
+  facet_wrap(~name, scales = "free") +
+  geom_point() +
+  geom_line(aes(y = smoothed), data = smoothed_curves |> filter(name %in% c("b1", "b2", "b3", "b4", "b5", "b6", "bH", "betaOUT", "alpha")), color = "blue") +
+  geom_vline(aes(xintercept = ci), data = ci_vals |> filter(name %in% c("b1", "b2", "b3", "b4", "b5", "b6", "bH", "betaOUT", "alpha")), linetype = "dashed") +
+  geom_label(aes(label = label, x = xpos, y = ypos), data = smoothed_curves |> filter(name %in% c("b1", "b2", "b3", "b4", "b5", "b6", "bH", "betaOUT", "alpha")), inherit.aes = FALSE, size = 5) +
+  theme_bw(22, base_family = "sans") +
+  labs(x = "Parameter value", y = "Log-likelihood") +
+  theme(
+    panel.grid.minor = element_blank(),
+    text = element_text(family = "sans")
+  )
+
+ggsave("figures/profile_Ahmedabad_RH_transmission.pdf", width = 14, height = 14, dpi = 600)
+
+all_res |>
+  select(-delta) |>
+  pivot_longer(-loglik) |>
+  split(~name) |>
+  lapply(filter_per_bin, max_per_bin = 10) |>
+  bind_rows(.id = "name") |>
+  filter(name %in% c("S1_0", "S2_0", "E_0", "I1_0", "I2_0", "F_0", "K_0")) |>
+  left_join(smoothed_curves |> select(name, ci_1, ci_2, delta) |> distinct()) |>
+  # filter(loglik >= max(loglik) - delta - 1) |>
+  ggplot(aes(x = value, y = loglik)) +
+  facet_wrap(~name, scales = "free") +
+  geom_point() +
+  geom_line(aes(y = smoothed), data = smoothed_curves |> filter(name %in% c("S1_0", "S2_0", "E_0", "I1_0", "I2_0", "F_0", "K_0")), color = "blue") +
+  geom_vline(aes(xintercept = ci), data = ci_vals |> filter(name %in% c("S1_0", "S2_0", "E_0", "I1_0", "I2_0", "F_0", "K_0")), linetype = "dashed") +
+  geom_label(aes(label = label, x = xpos, y = ypos), data = smoothed_curves |> filter(name %in% c("S1_0", "S2_0", "E_0", "I1_0", "I2_0", "F_0", "K_0")), inherit.aes = FALSE, size = 5) +
+  theme_bw(22, base_family = "sans") +
+  labs(x = "Parameter value", y = "Log-likelihood") +
+  theme(
+    panel.grid.minor = element_blank(),
+    text = element_text(family = "sans")
+  )
+
+ggsave("figures/profile_Ahmedabad_RH_initial.pdf", width = 14, height = 14, dpi = 600)
+
+
+all_res |>
+  select(-delta) |>
+  pivot_longer(-loglik) |>
+  split(~name) |>
+  lapply(filter_per_bin, max_per_bin = 10) |>
+  bind_rows(.id = "name") |>
+  filter(name %in% c("muEI1", "muS2S1", "muI1S2", "muI2S2", "q0", "rho", "tau", "sigOBS", "sigPRO")) |>
+  left_join(smoothed_curves |> select(name, ci_1, ci_2, delta) |> distinct()) |>
+  # filter(loglik >= max(loglik) - delta - 1) |>
+  ggplot(aes(x = value, y = loglik)) +
+  facet_wrap(~name, scales = "free") +
+  geom_point() +
+  geom_line(aes(y = smoothed), data = smoothed_curves |> filter(name %in% c("muEI1", "muS2S1", "muI1S2", "muI2S2", "q0", "rho", "tau", "sigOBS", "sigPRO")), color = "blue") +
+  geom_vline(aes(xintercept = ci), data = ci_vals |> filter(name %in% c("muEI1", "muS2S1", "muI1S2", "muI2S2", "q0", "rho", "tau", "sigOBS", "sigPRO")), linetype = "dashed") +
+  geom_label(aes(label = label, x = xpos, y = ypos), data = smoothed_curves |> filter(name %in% c("muEI1", "muS2S1", "muI1S2", "muI2S2", "q0", "rho", "tau", "sigOBS", "sigPRO")), inherit.aes = FALSE, size = 5) +
+  theme_bw(22, base_family = "sans") +
+  labs(x = "Parameter value", y = "Log-likelihood") +
+  theme(
+    panel.grid.minor = element_blank(),
+    text = element_text(family = "sans")
+  )
+
+ggsave("figures/profile_Ahmedabad_RH_immunity.pdf", width = 14, height = 14, dpi = 600)
+
+```
+
+```{r, eval = TRUE}
+all_res <- read_csv("aggregated_results/profile_Ahmedabad_Max_Temp_1997_2011_9_9.csv") |>
+  select(-c(flag, loglik.se, sample)) |>
+  filter(rho >= 0.01)
+
+all_res |>
+  select(-delta) |>
+  pivot_longer(-loglik) |>
+  split(~name) |>
+  lapply(plot_mcap_binned_2, max_per_bin = 10) |>
+  bind_rows(.id = "name") |>
+  rename(value = parameter) -> smoothed_curves
+
+ci_vals <- smoothed_curves |>
+  select(name, ci_1, ci_2) |>
+  distinct() |>
+  pivot_longer(-name, names_to = "name2") |>
+  rename(ci = value) |>
+  select(-name2)
+
+mle_vals <- all_res |>
+  select(-delta) |>
+  pivot_longer(-loglik) |>
+  group_by(name) |>
+  slice_max(loglik) |>
+  ungroup() |>
+  select(name, value) |>
+  rename(mle = value)
+
+smoothed_curves <- smoothed_curves |>
+  left_join(mle_vals) |>
+  mutate(
+    label = paste(
+      "MLE:", round(mle, digits = 4), paste0("CI: (", paste0(round(ci_1, digits = 4), ",", round(ci_2, digits = 4), ")"))
+    )
+  ) |>
+  group_by(name) |>
+  mutate(,
+    xpos = mean(value),
+    ypos = min(smoothed) - 1
+  )
+smoothed_curves |>
+  select(name, mle, ci_1, ci_2) |>
+  distinct() |>
+  mutate(
+    label = paste(
+      round(mle, digits = 4), paste0("(", paste0(round(ci_1, digits = 4), ",", round(ci_2, digits = 4), ")"))
+    )
+  ) |>
+  mutate(city = "Ahmedabad", covariate = "Maximum temperature") |>
+  select(city, covariate, name, label) |>
+  write_csv("figures/Ahmedabad_Max_Temp_parameters_profile.csv")
+
+all_res |>
+  select(-delta) |>
+  pivot_longer(-loglik) |>
+  split(~name) |>
+  lapply(filter_per_bin, max_per_bin = 10) |>
+  bind_rows(.id = "name") |>
+  filter(name %in% c("b1", "b2", "b3", "b4", "b5", "b6", "bH", "betaOUT", "alpha")) |>
+  left_join(smoothed_curves |> select(name, ci_1, ci_2, delta) |> distinct()) |>
+  # filter(loglik >= max(loglik) - delta - 1) |>
+  ggplot(aes(x = value, y = loglik)) +
+  facet_wrap(~name, scales = "free") +
+  geom_point() +
+  geom_line(aes(y = smoothed), data = smoothed_curves |> filter(name %in% c("b1", "b2", "b3", "b4", "b5", "b6", "bH", "betaOUT", "alpha")), color = "blue") +
+  geom_vline(aes(xintercept = ci), data = ci_vals |> filter(name %in% c("b1", "b2", "b3", "b4", "b5", "b6", "bH", "betaOUT", "alpha")), linetype = "dashed") +
+  geom_label(aes(label = label, x = xpos, y = ypos), data = smoothed_curves |> filter(name %in% c("b1", "b2", "b3", "b4", "b5", "b6", "bH", "betaOUT", "alpha")), inherit.aes = FALSE, size = 5) +
+  theme_bw(22, base_family = "sans") +
+  labs(x = "Parameter value", y = "Log-likelihood") +
+  theme(
+    panel.grid.minor = element_blank(),
+    text = element_text(family = "sans")
+  )
+
+ggsave("figures/profile_Ahmedabad_Max_Temp_transmission.pdf", width = 14, height = 14, dpi = 600)
+
+all_res |>
+  select(-delta) |>
+  pivot_longer(-loglik) |>
+  split(~name) |>
+  lapply(filter_per_bin, max_per_bin = 10) |>
+  bind_rows(.id = "name") |>
+  filter(name %in% c("S1_0", "S2_0", "E_0", "I1_0", "I2_0", "F_0", "K_0")) |>
+  left_join(smoothed_curves |> select(name, ci_1, ci_2, delta) |> distinct()) |>
+  # filter(loglik >= max(loglik) - delta - 1) |>
+  ggplot(aes(x = value, y = loglik)) +
+  facet_wrap(~name, scales = "free") +
+  geom_point() +
+  geom_line(aes(y = smoothed), data = smoothed_curves |> filter(name %in% c("S1_0", "S2_0", "E_0", "I1_0", "I2_0", "F_0", "K_0")), color = "blue") +
+  geom_vline(aes(xintercept = ci), data = ci_vals |> filter(name %in% c("S1_0", "S2_0", "E_0", "I1_0", "I2_0", "F_0", "K_0")), linetype = "dashed") +
+  geom_label(aes(label = label, x = xpos, y = ypos), data = smoothed_curves |> filter(name %in% c("S1_0", "S2_0", "E_0", "I1_0", "I2_0", "F_0", "K_0")), inherit.aes = FALSE, size = 5) +
+  theme_bw(22, base_family = "sans") +
+  labs(x = "Parameter value", y = "Log-likelihood") +
+  theme(
+    panel.grid.minor = element_blank(),
+    text = element_text(family = "sans")
+  )
+
+ggsave("figures/profile_Ahmedabad_Max_Temp_initial.pdf", width = 14, height = 14, dpi = 600)
+
+
+all_res |>
+  select(-delta) |>
+  pivot_longer(-loglik) |>
+  split(~name) |>
+  lapply(filter_per_bin, max_per_bin = 10) |>
+  bind_rows(.id = "name") |>
+  filter(name %in% c("muEI1", "muS2S1", "muI1S2", "muI2S2", "q0", "rho", "tau", "sigOBS", "sigPRO")) |>
+  left_join(smoothed_curves |> select(name, ci_1, ci_2, delta) |> distinct()) |>
+  # filter(loglik >= max(loglik) - delta - 1) |>
+  ggplot(aes(x = value, y = loglik)) +
+  facet_wrap(~name, scales = "free") +
+  geom_point() +
+  geom_line(aes(y = smoothed), data = smoothed_curves |> filter(name %in% c("muEI1", "muS2S1", "muI1S2", "muI2S2", "q0", "rho", "tau", "sigOBS", "sigPRO")), color = "blue") +
+  geom_vline(aes(xintercept = ci), data = ci_vals |> filter(name %in% c("muEI1", "muS2S1", "muI1S2", "muI2S2", "q0", "rho", "tau", "sigOBS", "sigPRO")), linetype = "dashed") +
+  geom_label(aes(label = label, x = xpos, y = ypos), data = smoothed_curves |> filter(name %in% c("muEI1", "muS2S1", "muI1S2", "muI2S2", "q0", "rho", "tau", "sigOBS", "sigPRO")), inherit.aes = FALSE, size = 5) +
+  theme_bw(22, base_family = "sans") +
+  labs(x = "Parameter value", y = "Log-likelihood") +
+  theme(
+    panel.grid.minor = element_blank(),
+    text = element_text(family = "sans")
+  )
+
+ggsave("figures/profile_Ahmedabad_Max_Temp_immunity.pdf", width = 14, height = 14, dpi = 600)
+
+```
+
+```{r, eval = TRUE}
+all_res <- read_csv("aggregated_results/profile_Surat_hadISD_1997_2016_7_7.csv") |>
+  select(-c(flag, loglik.se, sample)) |>
+  filter(rho >= 0.01)
+
+all_res |>
+  select(-delta) |>
+  pivot_longer(-loglik) |>
+  split(~name) |>
+  lapply(plot_mcap_binned_2, max_per_bin = 10) |>
+  bind_rows(.id = "name") |>
+  rename(value = parameter) -> smoothed_curves
+
+ci_vals <- smoothed_curves |>
+  select(name, ci_1, ci_2) |>
+  distinct() |>
+  pivot_longer(-name, names_to = "name2") |>
+  rename(ci = value) |>
+  select(-name2)
+
+mle_vals <- all_res |>
+  select(-delta) |>
+  pivot_longer(-loglik) |>
+  group_by(name) |>
+  slice_max(loglik) |>
+  ungroup() |>
+  select(name, value) |>
+  rename(mle = value)
+
+smoothed_curves <- smoothed_curves |>
+  left_join(mle_vals) |>
+  mutate(
+    label = paste(
+      "MLE:", round(mle, digits = 4), paste0("CI: (", paste0(round(ci_1, digits = 4), ",", round(ci_2, digits = 4), ")"))
+    )
+  ) |>
+  group_by(name) |>
+  mutate(,
+    xpos = mean(value),
+    ypos = min(smoothed) - 1
+  )
+
+smoothed_curves |>
+  select(name, mle, ci_1, ci_2) |>
+  distinct() |>
+  mutate(
+    label = paste(
+      round(mle, digits = 4), paste0("(", paste0(round(ci_1, digits = 4), ",", round(ci_2, digits = 4), ")"))
+    )
+  ) |>
+  mutate(city = "Surat", covariate = "Relative humidity") |>
+  select(city, covariate, name, label) |>
+  write_csv("figures/Surat_RH_parameters_profile.csv")
+
+all_res |>
+  select(-delta) |>
+  pivot_longer(-loglik) |>
+  split(~name) |>
+  lapply(filter_per_bin, max_per_bin = 10) |>
+  bind_rows(.id = "name") |>
+  filter(name %in% c("b1", "b2", "b3", "b4", "b5", "b6", "bH", "betaOUT", "alpha")) |>
+  left_join(smoothed_curves |> select(name, ci_1, ci_2, delta) |> distinct()) |>
+  # filter(loglik >= max(loglik) - delta - 1) |>
+  ggplot(aes(x = value, y = loglik)) +
+  facet_wrap(~name, scales = "free") +
+  geom_point() +
+  geom_line(aes(y = smoothed), data = smoothed_curves |> filter(name %in% c("b1", "b2", "b3", "b4", "b5", "b6", "bH", "betaOUT", "alpha")), color = "blue") +
+  geom_vline(aes(xintercept = ci), data = ci_vals |> filter(name %in% c("b1", "b2", "b3", "b4", "b5", "b6", "bH", "betaOUT", "alpha")), linetype = "dashed") +
+  geom_label(aes(label = label, x = xpos, y = ypos), data = smoothed_curves |> filter(name %in% c("b1", "b2", "b3", "b4", "b5", "b6", "bH", "betaOUT", "alpha")), inherit.aes = FALSE, size = 5) +
+  theme_bw(22, base_family = "sans") +
+  labs(x = "Parameter value", y = "Log-likelihood") +
+  theme(
+    panel.grid.minor = element_blank(),
+    text = element_text(family = "sans")
+  )
+
+ggsave("figures/profile_Surat_RH_transmission.pdf", width = 14, height = 14, dpi = 600)
+
+all_res |>
+  select(-delta) |>
+  pivot_longer(-loglik) |>
+  split(~name) |>
+  lapply(filter_per_bin, max_per_bin = 10) |>
+  bind_rows(.id = "name") |>
+  filter(name %in% c("S1_0", "S2_0", "E_0", "I1_0", "I2_0", "F_0", "K_0")) |>
+  left_join(smoothed_curves |> select(name, ci_1, ci_2, delta) |> distinct()) |>
+  # filter(loglik >= max(loglik) - delta - 1) |>
+  ggplot(aes(x = value, y = loglik)) +
+  facet_wrap(~name, scales = "free") +
+  geom_point() +
+  geom_line(aes(y = smoothed), data = smoothed_curves |> filter(name %in% c("S1_0", "S2_0", "E_0", "I1_0", "I2_0", "F_0", "K_0")), color = "blue") +
+  geom_vline(aes(xintercept = ci), data = ci_vals |> filter(name %in% c("S1_0", "S2_0", "E_0", "I1_0", "I2_0", "F_0", "K_0")), linetype = "dashed") +
+  geom_label(aes(label = label, x = xpos, y = ypos), data = smoothed_curves |> filter(name %in% c("S1_0", "S2_0", "E_0", "I1_0", "I2_0", "F_0", "K_0")), inherit.aes = FALSE, size = 5) +
+  theme_bw(22, base_family = "sans") +
+  labs(x = "Parameter value", y = "Log-likelihood") +
+  theme(
+    panel.grid.minor = element_blank(),
+    text = element_text(family = "sans")
+  )
+
+ggsave("figures/profile_Surat_RH_initial.pdf", width = 14, height = 14, dpi = 600)
+
+
+all_res |>
+  select(-delta) |>
+  pivot_longer(-loglik) |>
+  split(~name) |>
+  lapply(filter_per_bin, max_per_bin = 10) |>
+  bind_rows(.id = "name") |>
+  filter(name %in% c("muEI1", "muS2S1", "muI1S2", "muI2S2", "q0", "rho", "tau", "sigOBS", "sigPRO")) |>
+  left_join(smoothed_curves |> select(name, ci_1, ci_2, delta) |> distinct()) |>
+  # filter(loglik >= max(loglik) - delta - 1) |>
+  ggplot(aes(x = value, y = loglik)) +
+  facet_wrap(~name, scales = "free") +
+  geom_point() +
+  geom_line(aes(y = smoothed), data = smoothed_curves |> filter(name %in% c("muEI1", "muS2S1", "muI1S2", "muI2S2", "q0", "rho", "tau", "sigOBS", "sigPRO")), color = "blue") +
+  geom_vline(aes(xintercept = ci), data = ci_vals |> filter(name %in% c("muEI1", "muS2S1", "muI1S2", "muI2S2", "q0", "rho", "tau", "sigOBS", "sigPRO")), linetype = "dashed") +
+  geom_label(aes(label = label, x = xpos, y = ypos), data = smoothed_curves |> filter(name %in% c("muEI1", "muS2S1", "muI1S2", "muI2S2", "q0", "rho", "tau", "sigOBS", "sigPRO")), inherit.aes = FALSE, size = 5) +
+  theme_bw(22, base_family = "sans") +
+  labs(x = "Parameter value", y = "Log-likelihood") +
+  theme(
+    panel.grid.minor = element_blank(),
+    text = element_text(family = "sans")
+  )
+
+ggsave("figures/profile_Surat_RH_immunity.pdf", width = 14, height = 14, dpi = 600)
+```
+
+```{r, eval = TRUE}
+all_res <- read_csv("aggregated_results/profile_Surat_Max_Temp_1997_2016_5_9.csv") |>
+  select(-c(flag, loglik.se, sample)) |>
+  filter(rho >= 0.01)
+
+all_res |>
+  select(-delta) |>
+  pivot_longer(-loglik) |>
+  split(~name) |>
+  lapply(plot_mcap_binned_2, max_per_bin = 10) |>
+  bind_rows(.id = "name") |>
+  rename(value = parameter) -> smoothed_curves
+
+ci_vals <- smoothed_curves |>
+  select(name, ci_1, ci_2) |>
+  distinct() |>
+  pivot_longer(-name, names_to = "name2") |>
+  rename(ci = value) |>
+  select(-name2)
+
+mle_vals <- all_res |>
+  select(-delta) |>
+  pivot_longer(-loglik) |>
+  group_by(name) |>
+  slice_max(loglik) |>
+  ungroup() |>
+  select(name, value) |>
+  rename(mle = value)
+
+smoothed_curves <- smoothed_curves |>
+  left_join(mle_vals) |>
+  mutate(
+    label = paste(
+      "MLE:", round(mle, digits = 4), paste0("CI: (", paste0(round(ci_1, digits = 4), ",", round(ci_2, digits = 4), ")"))
+    )
+  ) |>
+  group_by(name) |>
+  mutate(,
+    xpos = mean(value),
+    ypos = min(smoothed) - 1
+  )
+
+smoothed_curves |>
+  select(name, mle, ci_1, ci_2) |>
+  distinct() |>
+  mutate(
+    label = paste(
+      round(mle, digits = 4), paste0("(", paste0(round(ci_1, digits = 4), ",", round(ci_2, digits = 4), ")"))
+    )
+  ) |>
+  mutate(city = "Surat", covariate = "Maximum temperature") |>
+  select(city, covariate, name, label) |>
+  write_csv("figures/Surat_Max_Temp_parameters_profile.csv")
+
+all_res |>
+  select(-delta) |>
+  pivot_longer(-loglik) |>
+  split(~name) |>
+  lapply(filter_per_bin, max_per_bin = 10) |>
+  bind_rows(.id = "name") |>
+  filter(name %in% c("b1", "b2", "b3", "b4", "b5", "b6", "bH", "betaOUT", "alpha")) |>
+  left_join(smoothed_curves |> select(name, ci_1, ci_2, delta) |> distinct()) |>
+  # filter(loglik >= max(loglik) - delta - 1) |>
+  ggplot(aes(x = value, y = loglik)) +
+  facet_wrap(~name, scales = "free") +
+  geom_point() +
+  geom_line(aes(y = smoothed), data = smoothed_curves |> filter(name %in% c("b1", "b2", "b3", "b4", "b5", "b6", "bH", "betaOUT", "alpha")), color = "blue") +
+  geom_vline(aes(xintercept = ci), data = ci_vals |> filter(name %in% c("b1", "b2", "b3", "b4", "b5", "b6", "bH", "betaOUT", "alpha")), linetype = "dashed") +
+  geom_label(aes(label = label, x = xpos, y = ypos), data = smoothed_curves |> filter(name %in% c("b1", "b2", "b3", "b4", "b5", "b6", "bH", "betaOUT", "alpha")), inherit.aes = FALSE, size = 5) +
+  theme_bw(22, base_family = "sans") +
+  labs(x = "Parameter value", y = "Log-likelihood") +
+  theme(
+    panel.grid.minor = element_blank(),
+    text = element_text(family = "sans")
+  )
+
+ggsave("figures/profile_Surat_Max_Temp_transmission.pdf", width = 14, height = 14, dpi = 600)
+
+all_res |>
+  select(-delta) |>
+  pivot_longer(-loglik) |>
+  split(~name) |>
+  lapply(filter_per_bin, max_per_bin = 10) |>
+  bind_rows(.id = "name") |>
+  filter(name %in% c("S1_0", "S2_0", "E_0", "I1_0", "I2_0", "F_0", "K_0")) |>
+  left_join(smoothed_curves |> select(name, ci_1, ci_2, delta) |> distinct()) |>
+  # filter(loglik >= max(loglik) - delta - 1) |>
+  ggplot(aes(x = value, y = loglik)) +
+  facet_wrap(~name, scales = "free") +
+  geom_point() +
+  geom_line(aes(y = smoothed), data = smoothed_curves |> filter(name %in% c("S1_0", "S2_0", "E_0", "I1_0", "I2_0", "F_0", "K_0")), color = "blue") +
+  geom_vline(aes(xintercept = ci), data = ci_vals |> filter(name %in% c("S1_0", "S2_0", "E_0", "I1_0", "I2_0", "F_0", "K_0")), linetype = "dashed") +
+  geom_label(aes(label = label, x = xpos, y = ypos), data = smoothed_curves |> filter(name %in% c("S1_0", "S2_0", "E_0", "I1_0", "I2_0", "F_0", "K_0")), inherit.aes = FALSE, size = 5) +
+  theme_bw(22, base_family = "sans") +
+  labs(x = "Parameter value", y = "Log-likelihood") +
+  theme(
+    panel.grid.minor = element_blank(),
+    text = element_text(family = "sans")
+  )
+
+ggsave("figures/profile_Surat_Max_Temp_initial.pdf", width = 14, height = 14, dpi = 600)
+
+
+all_res |>
+  select(-delta) |>
+  pivot_longer(-loglik) |>
+  split(~name) |>
+  lapply(filter_per_bin, max_per_bin = 10) |>
+  bind_rows(.id = "name") |>
+  filter(name %in% c("muEI1", "muS2S1", "muI1S2", "muI2S2", "q0", "rho", "tau", "sigOBS", "sigPRO")) |>
+  left_join(smoothed_curves |> select(name, ci_1, ci_2, delta) |> distinct()) |>
+  # filter(loglik >= max(loglik) - delta - 1) |>
+  ggplot(aes(x = value, y = loglik)) +
+  facet_wrap(~name, scales = "free") +
+  geom_point() +
+  geom_line(aes(y = smoothed), data = smoothed_curves |> filter(name %in% c("muEI1", "muS2S1", "muI1S2", "muI2S2", "q0", "rho", "tau", "sigOBS", "sigPRO")), color = "blue") +
+  geom_vline(aes(xintercept = ci), data = ci_vals |> filter(name %in% c("muEI1", "muS2S1", "muI1S2", "muI2S2", "q0", "rho", "tau", "sigOBS", "sigPRO")), linetype = "dashed") +
+  geom_label(aes(label = label, x = xpos, y = ypos), data = smoothed_curves |> filter(name %in% c("muEI1", "muS2S1", "muI1S2", "muI2S2", "q0", "rho", "tau", "sigOBS", "sigPRO")), inherit.aes = FALSE, size = 5) +
+  theme_bw(22, base_family = "sans") +
+  labs(x = "Parameter value", y = "Log-likelihood") +
+  theme(
+    panel.grid.minor = element_blank(),
+    text = element_text(family = "sans")
+  )
+
+ggsave("figures/profile_Surat_Max_Temp_immunity.pdf", width = 14, height = 14, dpi = 600)
+```

@@ -1,0 +1,136 @@
+---
+title: "Results testing"
+author: "Leonardo Souto Ferreira"
+date: today
+format: pdf
+knitr:
+  opts_knit:
+    root.dir: "/home/leonardo/Doutorado/humidity_malaria_update/"
+geometry:
+  - margin=2cm
+warning: false
+message: false
+echo: false
+fig-width: 8
+fig-height: 6
+---
+
+
+
+
+```{r, fig.width = 8, fig.height = 6, message = FALSE}
+source("R/simulation_functions.R")
+source("R/cleaning_profile_results.R")
+source("R/run_manifest.R")
+library(rstatix)
+
+
+compute_parameter_boundaries <- function(
+  dataset, diff_LL,
+  ignore_param = NULL, remove_outliers = TRUE
+) {
+  dataset <- dataset |>
+    filter(loglik >= max(loglik) - diff_LL)
+  outlier_list <- dataset |>
+    filter(loglik >= max(loglik) - diff_LL) |>
+    select(-any_of(c("loglik.se", "sample", "flag", "loglik", ignore_param))) |>
+    mutate(id = seq(1, nrow(dataset), 1)) |> # To create a unique column required to make that data in long form
+    pivot_longer(-id) |> # To make the data in long form required for `tidyverse`
+    group_by(name) |> # Based on which column you want aggregate
+    identify_outliers(value) |>
+    select(id, is.outlier) |>
+    distinct_all() |>
+    arrange(desc(id))
+
+  bounds <- dataset |>
+    mutate(id = seq(1, nrow(dataset), 1)) |>
+    left_join(outlier_list) |>
+    replace_na(list(is.outlier = FALSE)) |>
+    filter(!is.outlier) |>
+    select(-any_of(c("loglik.se", "sample", "flag", "loglik", ignore_param))) |>
+    pivot_longer(everything(), names_to = "parameter") |>
+    group_by(parameter) |>
+    summarize(
+      min_val = min(value, na.rm = TRUE),
+      max_val = max(value, na.rm = TRUE)
+    )
+
+  return(bounds)
+}
+
+generate_grid <- function(dataset, k = 1, diff_LL = 10, n_splits = 100, reps = 100, write = TRUE, output_dir = NULL) {
+  if (!dir.exists(output_dir)) {
+    dir.create(output_dir, recursive = TRUE)
+  }
+  bounds <- dataset |> compute_parameter_boundaries(diff_LL = diff_LL, ignore_param = "delta")
+  params <- dataset |>
+    get_top_sample(k = k)
+  param_grid <- params |>
+    lapply(rep, n_splits * reps) |>
+    bind_cols()
+  grids <- bounds |>
+    apply(1, function(x) {
+      param <- x |> unlist()
+      param <- param[1]
+      min_val <- x[2] |> as.numeric()
+      max_val <- x[3] |> as.numeric()
+      df <- param_grid |> mutate("{param}" := (seq(min_val, max_val, length.out = n_splits) |> rep(each = reps)))
+      if (write) {
+        write_csv(df, file.path(output_dir, paste0("param_grid_", param, ".csv")))
+      }
+      return(df)
+    })
+
+  names(grids) <- bounds |> pull("parameter")
+
+  return(grids)
+}
+
+
+```
+
+## Ahmedabad
+
+### hadISD
+
+#### RH
+```{r}
+result <- clean_file_result("results/aggregated/combined_results_20260204T181902Z_04eb_refined_second.csv") |>
+  filter(rho >= 0.01, alpha < 1) |>
+  filter(loglik >= max(loglik) - 40)
+
+params <- get_top_sample(result)
+print(params)
+
+outlier_list <- result |>
+  select(-any_of(c("loglik.se", "sample", "flag", "loglik"))) |>
+  mutate(id = seq(1, nrow(result), 1)) |> # To create a unique column required to make that data in long form
+  pivot_longer(-id) |> # To make the data in long form required for `tidyverse`
+  group_by(name) |> # Based on which column you want aggregate
+  identify_outliers(value) |>
+  select(id, is.outlier) |>
+  distinct_all() |>
+  arrange(desc(id))
+
+result |>
+  mutate(id = seq(1, nrow(result), 1)) |>
+  left_join(outlier_list) |>
+  replace_na(list(is.outlier = FALSE)) |>
+  # filter(!is.outlier) |>
+  select(-any_of(c("loglik.se", "sample", "flag"))) |>
+  pivot_longer(-c(loglik, is.outlier)) |>
+  ggplot(aes(x = value, y = loglik, color = is.outlier)) +
+  facet_wrap(~name, scales = "free_x") +
+  geom_point() +
+  theme_bw(8)
+
+# output_dir <- "param_grids/Ahmedabad/hadISD/"
+# if (!dir.exists(output_dir)) {
+#   dir.create(output_dir, recursive = TRUE)
+# }
+# output_file_path <- file.path(output_dir, "my_data.csv")
+
+generate_grid(result, diff_LL = 20, output_dir = "param_grids/Surat/baseline")
+```
+
+## Testing fitting

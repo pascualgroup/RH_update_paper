@@ -7,7 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
 <meta name="author" content="Leonardo Souto Ferreira">
-<meta name="dcterms.date" content="2026-02-11">
+<meta name="dcterms.date" content="2026-08-14">
 
 <title>Correlation and coherence</title>
 <style>
@@ -49,14 +49,14 @@ ul.task-list li input[type="checkbox"] {
     <h2 id="toc-title">Table of contents</h2>
    
   <ul>
-  <li><a href="#figure-1" id="toc-figure-1" class="nav-link active" data-scroll-target="#figure-1">Figure 1</a></li>
-  <li><a href="#figure-wavelets" id="toc-figure-wavelets" class="nav-link" data-scroll-target="#figure-wavelets">Figure wavelets</a></li>
-  <li><a href="#figure-2-new" id="toc-figure-2-new" class="nav-link" data-scroll-target="#figure-2-new">Figure 2 new</a></li>
-  <li><a href="#figure-2" id="toc-figure-2" class="nav-link" data-scroll-target="#figure-2">Figure 2</a></li>
-  <li><a href="#figure-3" id="toc-figure-3" class="nav-link" data-scroll-target="#figure-3">Figure 3</a>
+  <li><a href="#figure-1-case-time-series-covariate-correlations-and-station-map" id="toc-figure-1-case-time-series-covariate-correlations-and-station-map" class="nav-link active" data-scroll-target="#figure-1-case-time-series-covariate-correlations-and-station-map">Figure 1: case time series, covariate correlations, and station map</a></li>
+  <li><a href="#figure-wavelet-power-spectra" id="toc-figure-wavelet-power-spectra" class="nav-link" data-scroll-target="#figure-wavelet-power-spectra">Figure: wavelet power spectra</a></li>
+  <li><a href="#figure-wavelet-coherence" id="toc-figure-wavelet-coherence" class="nav-link" data-scroll-target="#figure-wavelet-coherence">Figure: wavelet coherence</a></li>
+  <li><a href="#figures-2-and-3-model-predictions-with-best-fit-parameters" id="toc-figures-2-and-3-model-predictions-with-best-fit-parameters" class="nav-link" data-scroll-target="#figures-2-and-3-model-predictions-with-best-fit-parameters">Figures 2 and 3: model predictions with best-fit parameters</a>
   <ul class="collapse">
-  <li><a href="#figure-covariates" id="toc-figure-covariates" class="nav-link" data-scroll-target="#figure-covariates">Figure covariates</a></li>
+  <li><a href="#alternate-combined-panel-disabled" id="toc-alternate-combined-panel-disabled" class="nav-link" data-scroll-target="#alternate-combined-panel-disabled">Alternate combined panel (disabled)</a></li>
   </ul></li>
+  <li><a href="#figure-scaled-covariate-windows" id="toc-figure-scaled-covariate-windows" class="nav-link" data-scroll-target="#figure-scaled-covariate-windows">Figure: scaled covariate windows</a></li>
   </ul>
 </nav>
 </div>
@@ -81,7 +81,7 @@ ul.task-list li input[type="checkbox"] {
     <div>
     <div class="quarto-title-meta-heading">Published</div>
     <div class="quarto-title-meta-contents">
-      <p class="date">February 11, 2026</p>
+      <p class="date">August 14, 2026</p>
     </div>
   </div>
   
@@ -93,47 +93,15 @@ ul.task-list li input[type="checkbox"] {
 </header>
 
 
-<section id="figure-1" class="level1">
-<h1>Figure 1</h1>
+<section id="figure-1-case-time-series-covariate-correlations-and-station-map" class="level1">
+<h1>Figure 1: case time series, covariate correlations, and station map</h1>
 <div class="cell">
-<div class="cell-output cell-output-stdout">
-<pre><code># A tibble: 6 × 5
-   year   cov    PF city      covariate        
-  &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;chr&gt;     &lt;chr&gt;            
-1  1997  78.2  2245 Ahmedabad Relative Humidity
-2  1998  77.9  1827 Ahmedabad Relative Humidity
-3  1999  69.8   951 Ahmedabad Relative Humidity
-4  2000  67.7   550 Ahmedabad Relative Humidity
-5  2001  66.2   662 Ahmedabad Relative Humidity
-6  2002  67.6   428 Ahmedabad Relative Humidity</code></pre>
-</div>
 <div class="cell-output-display">
 <div>
 <figure class="figure">
 <p><img src="new_figures_files/figure-html/unnamed-chunk-2-1.png" class="img-fluid figure-img" width="672"></p>
 </figure>
 </div>
-</div>
-<div class="cell-output cell-output-stdout">
-<pre><code>Simple feature collection with 11 features and 5 fields
-Geometry type: POINT
-Dimension:     XY
-Bounding box:  xmin: 72.635 ymin: 19.083 xmax: 86.933 ymax: 23.314
-Geodetic CRS:  WGS 84
-# A tibble: 11 × 6
-   state        id           name            lat  long        geometry
- * &lt;fct&gt;        &lt;chr&gt;        &lt;fct&gt;         &lt;dbl&gt; &lt;dbl&gt;     &lt;POINT [°]&gt;
- 1 Gujarat      426470-99999 Ahmedabad      23.1  72.6 (72.635 23.077)
- 2 Jharkhand    427010-99999 Birsa Munda    23.3  85.3 (85.322 23.314)
- 3 Chhattisgarh 427790-99999 Pendra Road    22.8  81.9   (81.9 22.767)
- 4 Jharkhand    427980-99999 Jamshedpur     22.8  86.2 (86.169 22.813)
- 5 Gujarat      428400-99999 Surat          21.2  72.8   (72.833 21.2)
- 6 Chhattisgarh 428740-99999 Pbo Raipur     21.2  81.6  (81.65 21.233)
- 7 Chhattisgarh 428750-99999 Swami Viveka…  21.2  81.7 (81.733 21.183)
- 8 Odisha       428860-99999 Jharsuguda     21.9  84.0  (84.05 21.914)
- 9 Odisha       428950-99999 Balasore       21.5  86.9 (86.933 21.517)
-10 Odisha       429710-99999 Bhubaneshwar   20.2  85.8 (85.818 20.244)
-11 Chhattisgarh 430410-99999 Jagdalpur      19.1  82.0 (82.033 19.083)</code></pre>
 </div>
 <div class="cell-output cell-output-stdout">
 <pre><code>Loading basemap 'world_physical_map' from map service 'esri'...</code></pre>
@@ -147,71 +115,15 @@ Geodetic CRS:  WGS 84
 </div>
 </div>
 </section>
-<section id="figure-wavelets" class="level1">
-<h1>Figure wavelets</h1>
-<div class="cell">
-<div class="cell-output-display">
-<div>
-<figure class="figure">
-<p><img src="new_figures_files/figure-html/unnamed-chunk-3-1.png" class="img-fluid figure-img" width="672"></p>
-</figure>
-</div>
-</div>
-<div class="cell-output-display">
-<div>
-<figure class="figure">
-<p><img src="new_figures_files/figure-html/unnamed-chunk-3-2.png" class="img-fluid figure-img" width="672"></p>
-</figure>
-</div>
-</div>
-</div>
+<section id="figure-wavelet-power-spectra" class="level1">
+<h1>Figure: wavelet power spectra</h1>
 </section>
-<section id="figure-2-new" class="level1">
-<h1>Figure 2 new</h1>
+<section id="figure-wavelet-coherence" class="level1">
+<h1>Figure: wavelet coherence</h1>
 </section>
-<section id="figure-2" class="level1">
-<h1>Figure 2</h1>
+<section id="figures-2-and-3-model-predictions-with-best-fit-parameters" class="level1">
+<h1>Figures 2 and 3: model predictions with best-fit parameters</h1>
 <div class="cell">
-<div class="cell-output cell-output-stdout">
-<pre><code># A tibble: 1 × 30
-  sigOBS sigPRO muS2S1 muEI1 muI1S2 muI2S2   betaOUT    rho    tau     bH    q0
-   &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;     &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt;
-1  0.196  0.104  0.190  57.1   62.4   15.6 0.0000532 0.0236 0.0668 -0.474 0.959
-# ℹ 19 more variables: b1 &lt;dbl&gt;, b2 &lt;dbl&gt;, b3 &lt;dbl&gt;, b4 &lt;dbl&gt;, b5 &lt;dbl&gt;,
-#   b6 &lt;dbl&gt;, delta &lt;dbl&gt;, S1_0 &lt;dbl&gt;, E_0 &lt;dbl&gt;, I1_0 &lt;dbl&gt;, S2_0 &lt;dbl&gt;,
-#   I2_0 &lt;dbl&gt;, K_0 &lt;dbl&gt;, F_0 &lt;dbl&gt;, alpha &lt;dbl&gt;, sample &lt;dbl&gt;, loglik &lt;dbl&gt;,
-#   loglik.se &lt;dbl&gt;, flag &lt;dbl&gt;</code></pre>
-</div>
-<div class="cell-output cell-output-stdout">
-<pre><code># A tibble: 1 × 30
-  sigOBS sigPRO muS2S1 muEI1 muI1S2 muI2S2   betaOUT    rho    tau    bH    q0
-   &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;     &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;
-1  0.169 0.0719  0.109  77.4   164.   16.5 0.0000562 0.0179 0.0387 0.627 0.869
-# ℹ 19 more variables: b1 &lt;dbl&gt;, b2 &lt;dbl&gt;, b3 &lt;dbl&gt;, b4 &lt;dbl&gt;, b5 &lt;dbl&gt;,
-#   b6 &lt;dbl&gt;, delta &lt;dbl&gt;, S1_0 &lt;dbl&gt;, E_0 &lt;dbl&gt;, I1_0 &lt;dbl&gt;, S2_0 &lt;dbl&gt;,
-#   I2_0 &lt;dbl&gt;, K_0 &lt;dbl&gt;, F_0 &lt;dbl&gt;, alpha &lt;dbl&gt;, sample &lt;dbl&gt;, loglik &lt;dbl&gt;,
-#   loglik.se &lt;dbl&gt;, flag &lt;dbl&gt;</code></pre>
-</div>
-<div class="cell-output cell-output-stdout">
-<pre><code># A tibble: 1 × 30
-  sigOBS sigPRO muS2S1 muEI1 muI1S2 muI2S2   betaOUT    rho     tau    bH    q0
-   &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;     &lt;dbl&gt;  &lt;dbl&gt;   &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;
-1  0.138  0.140   2.06  23.7   10.6   1.99 0.0000577 0.0120 0.00619  1.51 0.987
-# ℹ 19 more variables: b1 &lt;dbl&gt;, b2 &lt;dbl&gt;, b3 &lt;dbl&gt;, b4 &lt;dbl&gt;, b5 &lt;dbl&gt;,
-#   b6 &lt;dbl&gt;, delta &lt;dbl&gt;, S1_0 &lt;dbl&gt;, E_0 &lt;dbl&gt;, I1_0 &lt;dbl&gt;, S2_0 &lt;dbl&gt;,
-#   I2_0 &lt;dbl&gt;, K_0 &lt;dbl&gt;, F_0 &lt;dbl&gt;, alpha &lt;dbl&gt;, sample &lt;dbl&gt;, loglik &lt;dbl&gt;,
-#   loglik.se &lt;dbl&gt;, flag &lt;dbl&gt;</code></pre>
-</div>
-<div class="cell-output cell-output-stdout">
-<pre><code># A tibble: 1 × 30
-  sigOBS sigPRO muS2S1 muEI1 muI1S2 muI2S2     betaOUT    rho    tau    bH    q0
-   &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;       &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;
-1  0.168  0.141   4.24  388.   56.7   2.19 0.000000575 0.0103 0.0666 -1.09 0.974
-# ℹ 19 more variables: b1 &lt;dbl&gt;, b2 &lt;dbl&gt;, b3 &lt;dbl&gt;, b4 &lt;dbl&gt;, b5 &lt;dbl&gt;,
-#   b6 &lt;dbl&gt;, delta &lt;dbl&gt;, S1_0 &lt;dbl&gt;, E_0 &lt;dbl&gt;, I1_0 &lt;dbl&gt;, S2_0 &lt;dbl&gt;,
-#   I2_0 &lt;dbl&gt;, K_0 &lt;dbl&gt;, F_0 &lt;dbl&gt;, alpha &lt;dbl&gt;, sample &lt;dbl&gt;, loglik &lt;dbl&gt;,
-#   loglik.se &lt;dbl&gt;, flag &lt;dbl&gt;</code></pre>
-</div>
 <div class="cell-output-display">
 <div>
 <figure class="figure">
@@ -227,28 +139,14 @@ Geodetic CRS:  WGS 84
 </div>
 </div>
 </div>
+<section id="alternate-combined-panel-disabled" class="level2">
+<h2 class="anchored" data-anchor-id="alternate-combined-panel-disabled">Alternate combined panel (disabled)</h2>
+<p>Same predictions as above, laid out as a single faceted grid (city x covariate) for an alternate submission format. Currently disabled (<code>eval = FALSE</code>).</p>
 </section>
-<section id="figure-3" class="level1">
-<h1>Figure 3</h1>
-<section id="figure-covariates" class="level2">
-<h2 class="anchored" data-anchor-id="figure-covariates">Figure covariates</h2>
+</section>
+<section id="figure-scaled-covariate-windows" class="level1">
+<h1>Figure: scaled covariate windows</h1>
 <div class="cell">
-<div class="cell-output cell-output-stdout">
-<pre><code># A tibble: 108 × 5
-    year mean_covariate city      covariate         type 
-   &lt;dbl&gt;          &lt;dbl&gt; &lt;chr&gt;     &lt;chr&gt;             &lt;chr&gt;
- 1  1997         0.693  Ahmedabad Relative Humidity a    
- 2  1998         0.679  Ahmedabad Relative Humidity a    
- 3  1999         0.208  Ahmedabad Relative Humidity a    
- 4  2000         0.0832 Ahmedabad Relative Humidity a    
- 5  2001         0      Ahmedabad Relative Humidity a    
- 6  2002         0.0767 Ahmedabad Relative Humidity a    
- 7  2003         0.338  Ahmedabad Relative Humidity a    
- 8  2004         0.540  Ahmedabad Relative Humidity a    
- 9  2005         0.533  Ahmedabad Relative Humidity a    
-10  2006         0.622  Ahmedabad Relative Humidity a    
-# ℹ 98 more rows</code></pre>
-</div>
 <div class="cell-output-display">
 <div>
 <figure class="figure">
@@ -257,7 +155,6 @@ Geodetic CRS:  WGS 84
 </div>
 </div>
 </div>
-</section>
 </section>
 
 </main>

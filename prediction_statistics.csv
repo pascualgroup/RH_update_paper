@@ -1,0 +1,19 @@
+city,covariate_label,period,crps,coverage,n
+Ahmedabad,Baseline,Training,56.11,0.96,180
+Ahmedabad,Baseline,Testing (pre-2019),63.03,0.67,84
+Ahmedabad,Baseline,Testing (post-2019),110.33,0.07,60
+Ahmedabad,Maximum Temperature,Training,42.52,0.91,180
+Ahmedabad,Maximum Temperature,Testing (pre-2019),53.48,0.68,84
+Ahmedabad,Maximum Temperature,Testing (post-2019),116.87,0.07,60
+Ahmedabad,Relative Humidity,Training,40.36,0.92,180
+Ahmedabad,Relative Humidity,Testing (pre-2019),60.65,0.64,84
+Ahmedabad,Relative Humidity,Testing (post-2019),158.08,0.05,60
+Surat,Baseline,Training,113.08,0.9,240
+Surat,Baseline,Testing (pre-2019),52.7,0.67,24
+Surat,Baseline,Testing (post-2019),193.56,0,60
+Surat,Maximum Temperature,Training,102.99,0.99,240
+Surat,Maximum Temperature,Testing (pre-2019),11.71,0.96,24
+Surat,Maximum Temperature,Testing (post-2019),9.25,0.77,60
+Surat,Relative Humidity,Training,62.72,0.99,240
+Surat,Relative Humidity,Testing (pre-2019),23.88,0.88,24
+Surat,Relative Humidity,Testing (post-2019),27.63,0.4,60

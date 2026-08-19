@@ -1595,7 +1595,7 @@ preprocess_data_prediction <- function(
   return(list(dat_training, dat_prediction))
 }
 
-predict_model <- function(
+predict_model_states <- function(
   parameters, city, n_sims = 1,
   model = "original", covariate = "RH2",
   start_year = 1997, start_month = 1,
@@ -1686,14 +1686,12 @@ predict_model <- function(
     #  prediction_result <- r1 |>
     #  bind_rows(.id = "sample") |>
     mutate(is_data = if_else(.id == "data", "data", "simulation")) |>
-    mutate(type = "prediction") |>
-    dplyr::select(time, .id, is_data, type, PF, pop)
+    mutate(type = "prediction")
 
 
   training_result <- training_result |>
     mutate(is_data = if_else(.id == "data", "data", "simulation")) |>
-    mutate(type = "training") |>
-    dplyr::select(time, .id, is_data, type, PF, pop)
+    mutate(type = "training")
 
 
   result <- rbind(training_result, prediction_result)
@@ -1701,8 +1699,52 @@ predict_model <- function(
     mutate(type = if_else(is_data == "data", is_data, type)) |>
     as_tibble()
 
+  ## pomp::simulate() misaligns covariate columns (season1-6, covariate)
+  ## across .id when `params` is a matrix (one column per particle), as used
+  ## for the prediction step above: each simulation's row ends up reporting
+  ## another simulation's covariate value instead of its own. season1-6 and
+  ## covariate are deterministic functions of time, so re-derive them here
+  ## from the known covariate series instead of trusting pomp's output.
+  covariate_cols <- c(
+    "season1", "season2", "season3", "season4", "season5", "season6", "covariate"
+  )
+  covariate_lookup <- dat_training2 |>
+    dplyr::select(time, dplyr::any_of(covariate_cols)) |>
+    dplyr::distinct(time, .keep_all = TRUE)
+  result <- result |>
+    dplyr::select(-dplyr::any_of(covariate_cols)) |>
+    dplyr::left_join(covariate_lookup, by = "time")
 
   return(result)
+}
+
+
+## Thin wrapper kept for backwards compatibility: same signature and output
+## as before (state variables, e.g. S1/E/I1/I2/S2/K/F, dropped). Use
+## predict_model_states() directly when access to the hidden states is needed.
+predict_model <- function(
+  parameters, city, n_sims = 1,
+  model = "original", covariate = "RH2",
+  start_year = 1997, start_month = 1,
+  end_year = 2014, end_month = 12,
+  end_year_prediction = 2019, end_month_prediction = 12,
+  window_start, window_end,
+  dataset, output_format = c("data.frame", "pomps"),
+  actual_end_year = NULL, actual_end_month = NULL, extra_cov = NULL
+) {
+  output_format <- match.arg(output_format)
+
+  predict_model_states(
+    parameters, city, n_sims = n_sims,
+    model = model, covariate = covariate,
+    start_year = start_year, start_month = start_month,
+    end_year = end_year, end_month = end_month,
+    end_year_prediction = end_year_prediction, end_month_prediction = end_month_prediction,
+    window_start = window_start, window_end = window_end,
+    dataset = dataset, output_format = output_format,
+    actual_end_year = actual_end_year, actual_end_month = actual_end_month, extra_cov = extra_cov
+  ) |>
+    dplyr::select(time, .id, is_data, type, PF, pop)
 }
 
 
@@ -2144,7 +2186,7 @@ plot_prediction_by_year <- function(result, mode = c("ribbon", "traj"), CI = 0.8
     dplyr::filter(type != "data") |>
     rbind(complete_data) |>
     arrange(time, type) |>
-    mutate(covid = if_else(floor(time) == 2021 & type == "data", "sim", "nao"))
+    mutate(covid = if_else(floor(time) == 2020 & type == "data", "sim", "nao"))
   # }
 
   colors <- c("#000000", "#7570b3", "#1b9e77")
@@ -2152,7 +2194,7 @@ plot_prediction_by_year <- function(result, mode = c("ribbon", "traj"), CI = 0.8
 
   if (mode == "ribbon") {
     p <- dataset |> ggplot(aes(
-      x = time, y = PF, fill = type, color = type, linetype = covid
+      x = time, y = PF, fill = type, color = type
     )) +
       ggdist::stat_lineribbon(
         .width = CI, linewidth = 0.8, na.rm = TRUE,

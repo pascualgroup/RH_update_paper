@@ -1,0 +1,274 @@
+---
+title: "Quantitative estimates of the fits"
+author: "Leonardo Souto Ferreira"
+date: today
+format: html
+knitr:
+  opts_knit:
+    root.dir: "/home/leonardo/Doutorado/RH_update_paper/"
+geometry:
+  - margin=2cm
+warning: false
+message: false
+echo: false
+fig-width: 8
+fig-height: 4
+---
+
+This document fits each city/climate-covariate model, simulates from the
+fitted posterior, and scores the simulations against observed cases with the
+Continuous Ranked Probability Score (CRPS). CRPS is reported separately for
+the training period and for the testing (out-of-sample) period, and the
+testing period is further split into before and after 2019.
+
+```{r setup, include=FALSE, message=FALSE}
+library(here)
+source("R/simulation_functions.R")
+source("R/cleaning_profile_results.R")
+source("R/run_manifest.R")
+source("R/mcap.R")
+library(ggrepel)
+library(ggpubr)
+library(sf)
+library(patchwork)
+library(basemaps)
+library(ggspatial)
+```
+
+```{r helpers}
+
+#' Read a profile-likelihood CSV, keep the acceptable region, get the
+#' best-fitting parameter set, simulate from it and label training vs.
+#' testing (prediction) periods.
+fit_and_predict <- function(city, model, covariate_var, profile_file,
+                            start_year, end_year, window_start, window_end,
+                            end_year_prediction = 2023, n_sims = 1000) {
+  all_res <- read_csv(profile_file, show_col_types = FALSE)
+
+  # Some profile files carry extra bookkeeping columns (mode/profile_var/source_file)
+  # from refined profiling runs; restrict to the refined region when present.
+  if ("mode" %in% names(all_res)) {
+    all_res <- all_res |>
+      filter(mode == "refined_second", rho >= 0.01) |>
+      select(-mode, -profile_var, -source_file)
+  } else {
+    all_res <- all_res |> filter(rho >= 0.01)
+  }
+
+  all_res |>
+    get_top_sample(k = 1) |>
+    predict_model(city,
+      n_sims = n_sims,
+      model = model, covariate = covariate_var,
+      start_year = start_year, start_month = 1,
+      end_year = end_year, end_month = 12,
+      end_year_prediction = end_year_prediction, end_month_prediction = 12,
+      window_start = window_start, window_end = window_end,
+      dataset = paste0("data/", city, "/dataset_", city, "_2023.csv"),
+      output_format = "data.frame"
+    ) |>
+    mutate(city = city)
+}
+
+#' Per-time-point coverage of the simulation envelope around the observed
+#' data, split into training, and testing before/after 2019 (see
+#' `label_period()` below).
+compute_coverage <- function(result_df) {
+  result_df |>
+    filter(type != "data") |>
+    left_join(
+      result_df |> filter(type == "data") |> select(time, observed = PF),
+      by = "time"
+    ) |>
+    group_by(time, type) |>
+    summarize(
+      q025 = quantile(PF, 0.025),
+      q975 = quantile(PF, 0.975),
+      observed = mean(observed),
+      .groups = "drop"
+    ) |>
+    mutate(
+      in_between = between(observed, q025, q975),
+      period = label_period(type, time)
+    ) |>
+    group_by(period) |>
+    summarize(coverage = mean(in_between), n = n(), .groups = "drop")
+}
+
+#' Observed vs. median-predicted calibration plot, faceted/colored by type
+#' (training vs. prediction).
+plot_calibration <- function(result_df) {
+  result_df |>
+    filter(type != "data") |>
+    left_join(
+      result_df |> filter(type == "data") |> select(time, observed = PF),
+      by = "time"
+    ) |>
+    group_by(time, type) |>
+    summarize(
+      median = median(PF, na.rm = TRUE),
+      q025 = quantile(PF, 0.025),
+      q975 = quantile(PF, 0.975),
+      observed = mean(observed),
+      .groups = "drop"
+    ) |>
+    ggplot(aes(x = observed, y = median, ymin = q025, ymax = q975, color = type)) +
+    geom_abline(intercept = 0, slope = 1) +
+    geom_errorbar() +
+    geom_point() +
+    theme_bw(12)
+}
+
+#' CRPS per time point. Returns one row per observation time, with `type`
+#' ("training"/"prediction") carried over from the simulation ensemble so
+#' training vs. testing periods can be identified downstream.
+compute_crps <- function(result_df) {
+  observed <- result_df |>
+    filter(type == "data") |>
+    select(time, observed = PF)
+
+  sims <- result_df |>
+    filter(type != "data") |>
+    arrange(time)
+
+  time_type <- sims |>
+    distinct(time, type) |>
+    arrange(time)
+
+  pred_matrix <- sims |>
+    select(time, .id, PF) |>
+    pivot_wider(names_from = .id, values_from = PF) |>
+    arrange(time) |>
+    select(-time) |>
+    as.matrix()
+
+  observed_y <- time_type |>
+    left_join(observed, by = "time") |>
+    pull(observed)
+
+  scores <- scoringRules::crps_sample(y = observed_y, dat = pred_matrix, method = "edf")
+
+  time_type |> mutate(observed = observed_y, score = scores)
+}
+
+#' Label each CRPS observation as training, or testing before/after 2019.
+label_period <- function(type, time) {
+  case_when(
+    type == "training" ~ "Training",
+    time < 2019 ~ "Testing (pre-2019)",
+    TRUE ~ "Testing (post-2019)"
+  )
+}
+```
+
+## Model configurations
+
+One row per city/covariate model, matching the training windows used in the
+profile-likelihood fits. The baseline model has no climate-covariate
+term, so `covariate_var`/window are only used for the (unused) preprocessing
+step and are set to match that city's RH model for consistency.
+
+```{r configs}
+model_configs <- tribble(
+  ~city, ~covariate_label, ~model, ~covariate_var, ~profile_file, ~start_year, ~end_year, ~window_start, ~window_end,
+  "Ahmedabad", "Relative Humidity", "inf_exponent", "hadISD", "aggregated_results/profile_Ahmedabad_hadISD_1997_2011_8_9.csv", 1997, 2011, 8, 9,
+  "Ahmedabad", "Maximum Temperature", "inf_exponent", "Max_Temp", "aggregated_results/profile_Ahmedabad_Max_Temp_1997_2011_9_9.csv", 1997, 2011, 9, 9,
+  "Ahmedabad", "Baseline", "baseline", "hadISD", "aggregated_results/profile_Ahmedabad_baseline_1997_2011.csv", 1997, 2011, 8, 9,
+  "Surat", "Relative Humidity", "inf_exponent", "hadISD", "aggregated_results/profile_Surat_hadISD_1997_2016_7_7.csv", 1997, 2016, 7, 7,
+  "Surat", "Maximum Temperature", "inf_exponent", "Max_Temp", "aggregated_results/profile_Surat_Max_Temp_1997_2016_5_9.csv", 1997, 2016, 5, 9,
+  "Surat", "Baseline", "baseline", "hadISD", "aggregated_results/profile_Surat_baseline_1997_2016.csv", 1997, 2016, 7, 7,
+)
+
+model_configs
+```
+
+## Fit models and simulate
+
+```{r fit-all, cache=FALSE}
+predictions <- model_configs |>
+  mutate(result = purrr::pmap(
+    list(city, model, covariate_var, profile_file, start_year, end_year, window_start, window_end),
+    function(city, model, covariate_var, profile_file, start_year, end_year, window_start, window_end) {
+      fit_and_predict(city, model, covariate_var, profile_file, start_year, end_year, window_start, window_end)
+    }
+  ))
+```
+
+## Diagnostics by city and covariate
+
+### Coverage
+
+```{r coverage}
+coverage_table <- predictions |>
+  mutate(coverage = purrr::map(result, compute_coverage)) |>
+  select(city, covariate_label, coverage) |>
+  unnest(coverage) |>
+  mutate(period = factor(period, levels = c("Training", "Testing (pre-2019)", "Testing (post-2019)"))) |>
+  arrange(city, covariate_label, period)
+
+head(coverage_table)
+```
+
+### Calibration plots
+
+```{r calibration, fig.height=8}
+calibration_plots <- predictions |>
+  mutate(plot = purrr::pmap(list(result, city, covariate_label), function(result, city, covariate_label) {
+    plot_calibration(result) + labs(title = paste(city, "-", covariate_label))
+  }))
+
+wrap_plots(calibration_plots$plot, ncol = 2)
+```
+
+## CRPS
+
+```{r crps-all}
+crps_all <- predictions |>
+  mutate(crps = purrr::map(result, compute_crps)) |>
+  select(city, covariate_label, crps) |>
+  unnest(crps) |>
+  mutate(period = label_period(type, time)) |>
+  mutate(period = factor(period, levels = c("Training", "Testing (pre-2019)", "Testing (post-2019)")))
+
+head(crps_all)
+```
+
+### CRPS over time
+
+```{r crps-time-plot, fig.height=6}
+crps_all |>
+  ggplot(aes(x = time, y = score, color = covariate_label)) +
+  geom_line() +
+  facet_wrap(~city, ncol = 1, scales = "free_y") +
+  theme_bw(12) +
+  labs(x = "Time", y = "CRPS", color = "Covariate")
+```
+
+### Average CRPS by city, covariate and period
+
+```{r crps-summary}
+crps_summary <- crps_all |>
+  group_by(city, covariate_label, period) |>
+  summarize(crps = mean(score), n = n(), .groups = "drop") |>
+  arrange(city, covariate_label, period)
+
+crps_summary
+
+crps_summary |>
+  left_join(coverage_table) |>
+  relocate(n, .after = last_col()) |>
+  mutate(across(is.numeric, function(x) {
+    round(x, digits = 2)
+  })) |>
+  write_csv(here("prediction_statistics.csv"))
+```
+
+```{r crps-summary-plot, fig.height=5}
+crps_summary |>
+  ggplot(aes(x = period, y = crps, fill = covariate_label)) +
+  geom_col(position = position_dodge()) +
+  facet_wrap(~city) +
+  theme_bw(12) +
+  theme(axis.text.x = element_text(angle = 20, hjust = 1)) +
+  labs(x = NULL, y = "Average CRPS", fill = "Covariate")
+```

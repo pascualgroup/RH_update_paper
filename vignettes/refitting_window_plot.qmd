@@ -1,0 +1,238 @@
+---
+title: "Yearly refitting Ahmedabad"
+author: "Leonardo Souto Ferreira"
+date: today
+format: html
+knitr:
+  opts_knit:
+    root.dir: "/home/leonardo/Doutorado/RH_update_paper/"
+geometry:
+  - margin=2cm
+warning: false
+message: false
+echo: false
+fig-width: 8
+fig-height: 4
+---
+
+
+
+```{r, fig.width = 8, fig.height = 6, message = FALSE}
+source("R/simulation_functions.R")
+source("R/cleaning_profile_results.R")
+source("R/run_manifest.R")
+source("R/mcap.R")
+library(future.apply)
+library(patchwork)
+
+city <- "Ahmedabad"
+covariate <- "hadISD"
+window_start <- 8
+window_end <- 9
+
+yearly_preds <- read_csv(here::here(
+  "aggregated_results/yearly_prediction_Ahmedabad_hadISD.csv"
+))
+```
+
+## Panel A: coefficient in time
+
+Median (line) and min-max range across the 10 Monte Carlo replicates (ribbon) of
+the estimated scaling factor, by last year of the historical fitting window,
+faceted by window length. The dashed line marks 2018, the last year before the
+abrupt change in reported cases.
+
+```{r}
+panel_a <- yearly_preds |>
+  ggplot(aes(x = year + 2010, y = scaled_b)) +
+  facet_wrap(~window,
+    ncol = 5,
+    labeller = labeller(window = function(x) paste(x, "years"))
+  ) +
+  stat_summary(fun = median, geom = "line", linewidth = 0.5) +
+  stat_summary(fun.data = median_hilow, fun.args = list(conf.int = 1), geom = "ribbon", alpha = 0.3) +
+  geom_vline(
+    xintercept = 2018,
+    linetype = "dashed",
+    linewidth = 0.6,
+    color = "grey30"
+  ) +
+  theme_minimal(base_size = 7, base_family = "sans") +
+  theme(
+    axis.line = element_line(color = "black"),
+    legend.position = "none",
+    axis.title.y = ggtext::element_markdown(),
+    plot.margin = margin(0, 0, 0, 0, "cm"),
+    panel.grid.minor = element_blank(),
+    text = element_text(family = "Helvetica")
+  ) +
+  labs(
+    x = "Last year of historical window",
+    y = "Estimated scaling factor"
+  ) +
+  ylim(c(0, NA))
+
+print(panel_a)
+```
+
+## Panel B: CRPS by window length
+
+For each historical window length and each of the 10 parameter replicates, this
+re-simulates the model's one-year-ahead rolling forecasts (`simulate_yearly_prediction`,
+`model = "inf_exponent_scaled"`) and scores them against the observed cases with
+the empirical-distribution CRPS (`scoringRules::crps_sample(method = "edf")`),
+the same scoring approach used in `quantitative_estimates_fits.qmd`.
+
+This is expensive: 13 window lengths x 10 replicates x 1000 simulations each.
+Results are cached to `aggregated_results/crps_by_window_{city}_{covariate}.csv`
+so re-rendering this document doesn't repeat the computation; delete that file
+to force a re-run.
+
+```{r crps-helpers}
+#' CRPS per time point for one simulated replicate, using the empirical CDF
+#' of the simulated ensemble (same approach as compute_crps() in
+#' quantitative_estimates_fits.qmd).
+compute_crps <- function(result_df) {
+  observed <- result_df |>
+    filter(type == "data") |>
+    select(time, observed = PF)
+
+  sims <- result_df |>
+    filter(type != "data") |>
+    arrange(time)
+
+  time_type <- sims |>
+    distinct(time, type) |>
+    arrange(time)
+
+  pred_matrix <- sims |>
+    select(time, .id, PF) |>
+    pivot_wider(names_from = .id, values_from = PF) |>
+    arrange(time) |>
+    select(-time) |>
+    as.matrix()
+
+  observed_y <- time_type |>
+    left_join(observed, by = "time") |>
+    pull(observed)
+
+  scores <- scoringRules::crps_sample(y = observed_y, dat = pred_matrix, method = "edf")
+
+  time_type |> mutate(observed = observed_y, score = scores)
+}
+
+#' Simulate one (window, replicate) parameter set's one-year-ahead rolling
+#' forecasts and score the prediction period (>= 2012) against observed cases.
+simulate_and_score <- function(params, prediction_window, city, covariate,
+                               window_start, window_end, n_sims = 1000) {
+  dat_df <- str_glue("data/{city}/dataset_{city}_2023.csv")
+
+  result <- params |>
+    simulate_yearly_prediction(
+      city = city,
+      n_sims = n_sims,
+      model = "inf_exponent_scaled", covariate = covariate,
+      start_year = 1997, start_month = 1,
+      end_year = 2011, end_month = 12,
+      end_year_prediction = 2023, end_month_prediction = 12,
+      prediction_window = prediction_window,
+      window_start = window_start, window_end = window_end,
+      dataset = dat_df, output_format = c("data.frame", "pomps"), ignore_covid = TRUE,
+      actual_end_year = 2011, actual_end_month = 12
+    )
+
+  training <- result$training$training |>
+    mutate(type = if_else(.id == "data", "data", "training"))
+  prediction <- result$prediction |>
+    bind_rows() |>
+    mutate(type = if_else(.id == "data", "data", "prediction"))
+
+  complete_data <- result$complete_data |>
+    select(time, PF) |>
+    mutate(type = "data")
+
+  sim_df <- bind_rows(training, prediction) |>
+    select(time, .id, PF, type) |>
+    filter(type != "data", time >= 2012) |>
+    bind_rows(complete_data |> filter(time >= 2012)) |>
+    arrange(time, type)
+
+  compute_crps(sim_df)
+}
+```
+
+```{r crps-compute}
+crps_cache_file <- here::here(str_glue("aggregated_results/crps_by_window_{city}_{covariate}.csv"))
+
+if (file.exists(crps_cache_file)) {
+  crps_by_window <- read_csv(crps_cache_file)
+} else {
+  window_lengths <- sort(unique(yearly_preds$window))
+
+  crps_by_window <- map_dfr(window_lengths, function(w) {
+    yearly_preds |>
+      filter(window == w) |>
+      split(~rep) |>
+      imap_dfr(function(params, rep_id) {
+        simulate_and_score(params,
+          prediction_window = w, city = city, covariate = covariate,
+          window_start = window_start, window_end = window_end
+        ) |>
+          mutate(rep = rep_id)
+      }) |>
+      mutate(window = w)
+  })
+
+  write_csv(crps_by_window, crps_cache_file)
+}
+
+head(crps_by_window)
+```
+
+```{r crps-summary}
+crps_summary <- bind_rows(
+  crps_by_window |>
+    filter(time < 2019) |>
+    group_by(window, rep) |>
+    summarize(crps = mean(score, na.rm = TRUE), .groups = "drop") |>
+    group_by(window) |>
+    summarize(sd = sd(crps), crps = mean(crps), .groups = "drop") |>
+    mutate(includes = "Excludes 2019-2023"),
+  crps_by_window |>
+    filter(floor(time) != 2020) |>
+    group_by(window, rep) |>
+    summarize(crps = mean(score, na.rm = TRUE), .groups = "drop") |>
+    group_by(window) |>
+    summarize(sd = sd(crps), crps = mean(crps), .groups = "drop") |>
+    mutate(includes = "Includes 2019-2023")
+) |>
+  mutate(includes = factor(includes, levels = c("Includes 2019-2023", "Excludes 2019-2023")))
+
+panel_b <- crps_summary |>
+  ggplot(aes(x = window, y = crps, ymin = crps - sd, ymax = crps + sd)) +
+  facet_wrap(~includes) +
+  geom_point() +
+  geom_pointrange() +
+  theme_minimal(base_size = 7, base_family = "sans") +
+  theme(
+    axis.line = element_line(color = "black"),
+    legend.position = "none",
+    axis.title.y = ggtext::element_markdown(),
+    plot.margin = margin(0, 0, 0, 0, "cm"),
+    panel.grid.minor = element_blank(),
+    text = element_text(family = "Helvetica")
+  ) +
+  labs(x = "Historical window length", y = "CRPS") +
+  xlim(c(2, 14))
+
+print(panel_b)
+```
+
+## Combined figure
+
+```{r figure4}
+(panel_a / panel_b) + plot_layout(heights = c(1, 1)) + plot_annotation(tag_levels = "A") &
+  theme(plot.tag.position = c(0.01, 0.97))
+
+ggsave(here::here("figures/figure4.pdf"), units = "mm", width = 180, height = 120, dpi = 1000)
+```

@@ -1,0 +1,156 @@
+---
+title: "Plausibility of biological rates"
+author: "Leonardo Souto Ferreira"
+date: today
+format: html
+knitr:
+  opts_knit:
+    root.dir: "/home/leonardo/Doutorado/humidity_malaria_update/"
+geometry:
+  - margin=2cm
+warning: false
+message: false
+echo: false
+fig-width: 8
+fig-height: 4
+---
+
+
+
+```{r setup, include=FALSE, message=FALSE}
+knitr::opts_chunk$set(autodep = TRUE)
+library(here)
+source("R/simulation_functions.R")
+source("R/cleaning_profile_results.R")
+source("R/run_manifest.R")
+source("R/mcap.R")
+library(ggrepel)
+library(ggpubr)
+library(sf)
+library(patchwork)
+library(basemaps)
+library(ggspatial)
+```
+
+```{r helpers}
+
+#' Read a profile-likelihood CSV, keep the acceptable region, get the
+#' best-fitting parameter set, simulate from it and label training vs.
+#' testing (prediction) periods.
+fit_and_predict <- function(city, model, covariate_var, profile_file,
+                            start_year, end_year, window_start, window_end,
+                            end_year_prediction = 2023, n_sims = 1000) {
+  all_res <- read_csv(profile_file, show_col_types = FALSE)
+
+  # Some profile files carry extra bookkeeping columns (mode/profile_var/source_file)
+  # from refined profiling runs; restrict to the refined region when present.
+  if ("mode" %in% names(all_res)) {
+    all_res <- all_res |>
+      filter(mode == "refined_second", rho >= 0.01) |>
+      select(-mode, -profile_var, -source_file)
+  } else {
+    all_res <- all_res |> filter(rho >= 0.01)
+  }
+
+  top_params <- all_res |> get_top_sample(k = 1)
+
+  top_params |>
+    predict_model_states(city,
+      n_sims = n_sims,
+      model = model, covariate = covariate_var,
+      start_year = start_year, start_month = 1,
+      end_year = end_year, end_month = 12,
+      end_year_prediction = end_year_prediction, end_month_prediction = 12,
+      window_start = window_start, window_end = window_end,
+      dataset = paste0("data/", city, "/dataset_", city, "_2023.csv"),
+      output_format = "data.frame"
+    ) |>
+    mutate(city = city, covariate_var = covariate_var, model = model) |>
+    mutate(covariate_var = if_else(model == "baseline", "Baseline", covariate_var)) |>
+    bind_cols(as.list(top_params))
+}
+```
+
+## Model configurations
+
+One row per city/covariate model, matching the training windows used in the
+profile-likelihood fits. The baseline model has no climate-covariate
+term, so `covariate_var`/window are only used for the (unused) preprocessing
+step and are set to match that city's RH model for consistency.
+
+```{r configs}
+model_configs <- tribble(
+  ~city, ~covariate_label, ~model, ~covariate_var, ~profile_file, ~start_year, ~end_year, ~window_start, ~window_end,
+  "Ahmedabad", "Relative Humidity", "inf_exponent", "hadISD", "aggregated_results/profile_Ahmedabad_hadISD_1997_2011_8_9.csv", 1997, 2011, 8, 9,
+  "Ahmedabad", "Maximum Temperature", "inf_exponent", "Max_Temp", "aggregated_results/profile_Ahmedabad_Max_Temp_1997_2011_9_9.csv", 1997, 2011, 9, 9,
+  "Ahmedabad", "Baseline", "baseline", "hadISD", "aggregated_results/profile_Ahmedabad_baseline_1997_2011.csv", 1997, 2011, 8, 9,
+  "Surat", "Relative Humidity", "inf_exponent", "hadISD", "aggregated_results/profile_Surat_hadISD_1997_2016_7_7.csv", 1997, 2016, 7, 7,
+  "Surat", "Maximum Temperature", "inf_exponent", "Max_Temp", "aggregated_results/profile_Surat_Max_Temp_1997_2016_5_9.csv", 1997, 2016, 5, 9,
+  "Surat", "Baseline", "baseline", "hadISD", "aggregated_results/profile_Surat_baseline_1997_2016.csv", 1997, 2016, 7, 7,
+)
+
+model_configs
+```
+
+## Fit models and simulate
+
+```{r fit-all, cache=FALSE, dependson="helpers"}
+predictions <- model_configs |>
+  mutate(result = purrr::pmap(
+    list(city, model, covariate_var, profile_file, start_year, end_year, window_start, window_end),
+    function(city, model, covariate_var, profile_file, start_year, end_year, window_start, window_end) {
+      fit_and_predict(city, model, covariate_var, profile_file, start_year, end_year, window_start, window_end)
+    }
+  ))
+
+all_results <- predictions$result |>
+  bind_rows() |>
+  mutate(covariate_var = case_when(
+    covariate_var == "hadISD" ~ "Relative Humidity",
+    covariate_var == "Max_Temp" ~ "Maximum Temperature",
+    TRUE ~ "Baseline"
+  )) |>
+  mutate(
+    bH = if_else(model == "baseline", 0, bH),
+    covariate = if_else(model == "baseline", 0, covariate)
+  )
+head(all_results)
+```
+
+## Prevalence plots
+
+```{r, dependson="helpers"}
+
+all_results |>
+  filter(.id != "data") |>
+  mutate(.id = as.numeric(.id)) |>
+  ggplot(aes(x = time, y = (S1 + S2) / (S1 + S2 + E + I2 + I1))) +
+  facet_grid(cols = vars(covariate_var), rows = vars(city)) +
+  ggdist::stat_lineribbon(linewidth = 0.7) +
+  theme_bw(12)
+```
+
+
+## Transmission Rate plots
+
+```{r}
+all_results |>
+  filter(.id != "data") |>
+  mutate(.id = as.numeric(.id)) |>
+  mutate(beta = exp(b1 * season1 + b2 * season2 + b3 * season3 + b4 * season4 +
+    b5 * season5 + b6 * season6 + season4 * bH * covariate)) |>
+  group_by(city, covariate_var, time) |>
+  summarize(beta = mean(beta, na.rm = TRUE)) |>
+  mutate(
+    year = floor(time),
+    month = round((time - year) * 12 + 1)
+  ) |>
+  ggplot(aes(x = month, y = beta, group = year)) +
+  facet_grid(
+    cols = vars(covariate_var), rows = vars(city),
+    scales = "free_y"
+  ) +
+  geom_line(color = "grey70") +
+  stat_summary(fun = median, geom = "line", aes(group = 1), color = "blue", size = 0.5) +
+  theme_bw(12)
+```

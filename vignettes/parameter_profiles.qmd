@@ -1,5 +1,5 @@
 ---
-title: "Correlation and coherence"
+title: "Parameter profiles"
 author: "Leonardo Souto Ferreira"
 date: today
 format: html
@@ -11,7 +11,7 @@ execute:
   eval: TRUE
 knitr:
   opts_knit:
-    root.dir: "/home/leonardo/Doutorado/humidity_malaria_update/"
+    root.dir: "/home/leonardo/Doutorado/RH_update_paper/"
 geometry:
   - margin=2cm
 ---
@@ -20,642 +20,582 @@ geometry:
 library(tidyverse)
 source("R/mcap.R")
 source("R/cleaning_profile_results.R")
+
+param_groups <- list(
+  transmission = c("b1", "b2", "b3", "b4", "b5", "b6", "bH", "betaOUT", "alpha"),
+  initial = c("S1_0", "S2_0", "E_0", "I1_0", "I2_0", "F_0", "K_0"),
+  immunity = c("muEI1", "muS2S1", "muI1S2", "muI2S2", "q0", "rho", "tau", "sigOBS", "sigPRO")
+)
 ```
 
+# Parameter transforms
 
-```{r}
-all_res <- read_csv("aggregated_results/profile_Ahmedabad_hadISD_1997_2011_8_9.csv") |>
-  filter(mode == "refined_second", rho >= 0.01) |>
-  select(-mode, -profile_var, -source_file, -loglik.se, -sample, -flag)
-
-
-k <- 1
-```
+All four profile files were produced with the `inf_exponent` model, so the
+estimation-scale transform is the one defined in
+`dynamical_model/fitting/pomp_object_inf_exponent.R` (fed to pomp via
+`parameter_trans(log=, logit=, barycentric=)` in `prepare_pomp_model()`).
+MCAP's loess/quadratic machinery assumes an approximately quadratic
+log-likelihood surface, which only holds on the scale the model was actually
+fit on — so profile CIs need to be computed after transforming to that scale,
+then mapped back to the natural scale for plotting.
 
 ```{r, eval = TRUE}
-plot_mcap_binned_2 <- function(dataset, n_quantiles = 20, max_per_bin = 20, diff_LL = NULL, remove_outlier = TRUE, zscore = TRUE) {
-  column_name <- "value"
-  dataset <- dataset[complete.cases(dataset), ]
-  if (!is.null(diff_LL)) {
-    dataset <- dataset |> filter(loglik >= max(loglik) - diff_LL)
-  }
+model_env <- new.env()
+sys.source("dynamical_model/fitting/pomp_object_inf_exponent.R", envir = model_env)
 
-  dataset <- dataset |>
-    bin_by_quantile(column_name, n_quantiles) |>
-    group_by(quantile) |>
-    slice_max(loglik, n = max_per_bin) |>
-    ungroup() |>
-    mutate(mid_val = (start + end) / 2) |>
-    # group_by(mid_val) |>
-    # summarize(loglik = mean(loglik)) |>
-    # ungroup() |>
-    remove_missing()
+# S1_0/E_0/I1_0/S2_0/I2_0 are barycentric-transformed as a group:
+# T_i = log(theta_i / sum(theta)). But pomp's fromEst always reconstructs the
+# natural-scale values with sum(theta) == 1 (verified on every row of all 4
+# profile files), so T_i = log(theta_i) exactly here -- a plain log transform.
+log_scale_params <- c(model_env$log_transf, model_env$barycentric_transf)
+logit_scale_params <- model_env$logit_transf
 
-  if (remove_outlier) {
-    if (zscore) {
-      dataset <- dataset |>
-        mutate(zscore = (!!sym(column_name) - mean(!!sym(column_name))) / (sd(!!sym(column_name)))) |>
-        filter(abs(zscore) <= 2)
+#' Vectorized over `name` (so it also works on a multi-parameter data frame,
+#' not just a single already-split-out parameter).
+param_scale <- function(name) {
+  case_when(
+    name %in% log_scale_params ~ "log",
+    name %in% logit_scale_params ~ "logit",
+    TRUE ~ "identity"
+  )
+}
+
+#' Vectorized over `scale` too (a single scale string is recycled as usual).
+#' case_when() evaluates every branch's RHS across the whole vector before
+#' picking per-element which one applies, so e.g. qlogis() on a log-scale
+#' parameter's (out-of-[0,1]-range) value harmlessly warns "NaNs produced"
+#' even though that NaN is never selected; suppressWarnings() here is only
+#' silencing that non-issue, not hiding a real one.
+to_est <- function(value, scale) {
+  suppressWarnings(case_when(
+    scale == "log" ~ log(value),
+    scale == "logit" ~ qlogis(value),
+    TRUE ~ value
+  ))
+}
+
+from_est <- function(value, scale) {
+  suppressWarnings(case_when(
+    scale == "log" ~ exp(value),
+    scale == "logit" ~ plogis(value),
+    TRUE ~ value
+  ))
+}
+```
+
+# Plot conventions
+
+Black points are Monte Carlo estimates of the profile log-likelihood from the
+retained parameter fits; the blue curve is the loess-smoothed profile used
+for MCAP inference. The vermillion solid vertical line marks the true
+(unrestricted) MLE -- the single best raw log-likelihood evaluation across
+the whole retained dataset, i.e. the same fitted parameter vector for every
+panel -- and the orange dashed vertical lines mark the 95% MCAP confidence
+limits. The bottom-center annotation in each panel gives
+`MLE [CI low, CI high] (Δ=delta)` to ~3 significant digits; a confidence
+limit that rounds to the parameter's natural boundary (e.g. `[..., 1.00]`
+for a logit-scale parameter) indicates the profile is boundary-limited
+rather than showing a conventional interior optimum. `delta` is the
+log-likelihood drop `mcap_checked()` used to define the CI cutoff (the
+profile is "inside" the CI wherever the smoothed curve is within `delta` of
+its own maximum) -- i.e. how much loglik had to be given up to bound the
+parameter; `delta` is `NA` when the quadratic fit isn't concave, in which
+case the reported CI is just the explored parameter range, not a real MCAP
+interval (both bounds will also show as truncated). Unless noted otherwise, the y-axis shows log-likelihood *relative
+to* that same true MLE (not the loess-smoothed maximum, which is noisier and
+per-panel), with a shared range computed from the plotted data so panels
+stay comparable; a curve poking above 0 flags Monte Carlo noise in the
+profile (see recommendation #14 in the source recommendations) rather than a
+better fit than the MLE. x-axes remain free per panel since parameter
+domains differ (unconstrained coefficients, positive rates, probabilities,
+proportions). Parameters were fit, and MCAP confidence intervals computed,
+on their estimation scale (see "Parameter transforms" above); this figure
+shows them back-transformed to the natural/biological scale, with a
+transformed-scale diagnostic version available via
+`plot_profile_group_transformed()` to check the underlying fit quality.
+
+```{r, eval = TRUE}
+#' Format to ~`digits` significant figures: fixed notation in a normal range,
+#' scientific notation for very small/large magnitudes. Used instead of a
+#' fixed number of decimal places so labels stay compact whether the
+#' parameter is ~1e-8 or ~600.
+fmt_sig <- function(x, digits = 3) {
+  vapply(x, function(xi) {
+    if (is.na(xi)) {
+      return(NA_character_)
+    }
+    if (xi != 0 && (abs(xi) < 1e-3 || abs(xi) >= 1e3)) {
+      formatC(xi, format = "e", digits = digits - 1)
     } else {
-      col_vals <- dataset |> pull(column_name)
-      iqr <- IQR(col_vals)
-      q_min <- quantile(col_vals, 0.25) - 1.5 * iqr
-      q_max <- quantile(col_vals, 0.75) + 1.5 * iqr
-      dataset <- dataset |> filter(!!sym(column_name) >= q_min, !!sym(column_name) <= q_max)
+      sub("\\.$", "", formatC(signif(xi, digits), format = "fg", digits = digits, flag = "#"))
     }
+  }, character(1))
+}
+
+#' "mle [ci_1, ci_2] (delta=...)", ~3 significant figures -- the compact
+#' annotation used in every profile panel instead of repeating "MLE:"/"CI:"
+#' labels. A bound flagged `*_truncated` (mcap_checked(): non-concave fit,
+#' edge maximum, or too few local points -- see R/mcap.R) is not an actual
+#' MCAP threshold crossing, just the edge of the explored profile range, so
+#' it's shown as "<value"/">value" (true bound unknown beyond that point)
+#' rather than as if it were a properly estimated limit. `delta` is the
+#' log-likelihood drop mcap_checked() used to define the CI (the profile is
+#' "inside" the CI wherever smoothed loglik is within `delta` of its own
+#' max) -- how much of the loglik had to be given up to bound the parameter;
+#' NA (non-concave fit -- no valid delta) is shown as literal "NA" via
+#' fmt_sig()/paste0()'s normal NA-to-text handling, not a special case here.
+fmt_mle_ci <- function(mle, ci_1, ci_2, ci_1_truncated = FALSE, ci_2_truncated = FALSE,
+                       delta = NA_real_, digits = 3) {
+  lo <- paste0(ifelse(ci_1_truncated, "<", ""), fmt_sig(ci_1, digits))
+  hi <- paste0(ifelse(ci_2_truncated, ">", ""), fmt_sig(ci_2, digits))
+  paste0(fmt_sig(mle, digits), " [", lo, ", ", hi, "] (Δ=", fmt_sig(delta, digits), ")")
+}
+
+# Publication-quality facet labels (plotmath) for the natural-scale plot.
+parameter_labels <- c(
+  alpha = "alpha",
+  b1 = "b[1]", b2 = "b[2]", b3 = "b[3]", b4 = "b[4]", b5 = "b[5]", b6 = "b[6]",
+  bH = "b[H]",
+  betaOUT = "beta[out]",
+  muEI1 = "mu[EI1]",
+  muS2S1 = "mu[S2*S1]",
+  muI1S2 = "mu[I1*S2]",
+  muI2S2 = "mu[I2*S2]",
+  q0 = "q[0]",
+  rho = "rho",
+  tau = "tau",
+  sigOBS = "sigma[obs]",
+  sigPRO = "sigma[proc]",
+  S1_0 = "S[1]^0",
+  S2_0 = "S[2]^0",
+  E_0 = "E^0",
+  I1_0 = "I[1]^0",
+  I2_0 = "I[2]^0",
+  K_0 = "K^0",
+  F_0 = "F^0"
+)
+
+# Okabe-Ito colorblind-safe palette, matching the manuscript figures in
+# new_figures.qmd. Curve = blue, MLE line = vermillion, CI lines = orange.
+okabe_ito <- c(
+  orange = "#E69F00", skyblue = "#56B4E9", green = "#009E73", yellow = "#F0E442",
+  blue = "#0072B2", vermillion = "#D55E00", purple = "#CC79A7", black = "#000000"
+)
+
+#' Shared look for the profile-likelihood plots, matching the manuscript
+#' figures in new_figures.qmd (minimal theme, black axis lines, no minor
+#' gridlines, Helvetica).
+theme_profile <- function(base_size) {
+  theme_minimal(base_size = base_size, base_family = "sans") +
+    theme(
+      axis.line = element_line(color = "black"),
+      legend.position = "none",
+      panel.grid.minor = element_blank(),
+      text = element_text(family = "Helvetica")
+    )
+}
+```
+
+# Helper functions
+
+```{r, eval = TRUE}
+#' Reduce a parameter's (value, loglik) pairs to one row per DISTINCT focal
+#' value: the single best (max) log-likelihood evaluation at that value. This
+#' is what a profile-likelihood run actually is -- the focal parameter is
+#' fixed at a grid of values and every other parameter is re-optimized at
+#' each one -- so grouping by the focal parameter's own exact value and
+#' taking the best of however many replicate optimizations landed there
+#' recovers the profile directly; no binning needed, and no z-score/IQR
+#' trimming either (a value being unusual among the sampled cloud says
+#' nothing about whether its likelihood is relevant, and profile tails,
+#' where CI endpoints live, are exactly where trimming would cut).
+#'
+#' When the data carries a `profile_var` column (recording which parameter
+#' was actually held fixed for a given row -- currently only
+#' profile_Ahmedabad_hadISD_1997_2011_8_9.csv), rows are first restricted to
+#' `profile_var == name`: this parameter's own profile run, not the whole
+#' multi-parameter file. Without `profile_var`, the same
+#' group-by-exact-value logic runs on the whole dataset instead (rows from
+#' OTHER parameters' profile runs, where this one was itself free to vary,
+#' essentially never land on exactly the same value twice, so they just
+#' contribute as their own single-row group -- a reasonable but noisier
+#' approximation of the same thing).
+#'
+#' `diff_LL` is applied relative to THIS parameter's own best loglik within
+#' its (possibly profile_var-isolated) subset, not some unrelated global
+#' optimum, and widens automatically if too few distinct grid values survive
+#' it for a stable MCAP quadratic fit. `n_replicates` (kept as diagnostic
+#' metadata) is how many rows shared that exact value before picking the
+#' best one.
+focal_profile_points <- function(dataset, diff_LL = 10, min_points = 20) {
+  dataset <- dataset[complete.cases(dataset), ] |>
+    filter(loglik >= max(loglik) - diff_LL)
+
+  focal_name <- unique(dataset$name)
+  if ("profile_var" %in% names(dataset)) {
+    dataset <- dataset |> filter(profile_var == focal_name)
   }
 
-  parameter <- dataset |> pull("value")
-  lp <- dataset |> pull("loglik")
-  mcap_res <- mcap(lp, parameter, lambda = 0.75)
-  p <- with(mcap_res, {
-    data_points <- data.frame(
-      parameter = parameter,
-      loglik = lp
-    )
-    if (is.infinite(ci[1])) {
-      ci[1] <- min(data_points$parameter)
-    }
-    if (is.infinite(ci[2])) {
-      ci[2] <- max(data_points$parameter)
-    }
+  if (nrow(dataset) == 0) {
+    return(dataset |> mutate(n_replicates = integer(0)))
+  }
+  reduced <- dataset |>
+    group_by(value) |>
+    mutate(n_replicates = n()) |>
+    slice_max(loglik, n = 1, with_ties = FALSE) |>
+    ungroup()
 
-    fit <- fit |>
+  return(reduced)
+}
+
+plot_mcap_binned_2 <- function(dataset, diff_LL = 10, min_points = 20) {
+  scale <- param_scale(unique(dataset$name))
+  dataset <- focal_profile_points(dataset, diff_LL = diff_LL, min_points = min_points)
+
+  if (nrow(dataset) < 4) {
+    return(tibble(
+      parameter = NA_real_, smoothed = NA_real_, quadratic = NA_real_,
+      ci_1 = NA_real_, ci_2 = NA_real_,
+      ci_1_truncated = NA, ci_2_truncated = NA, delta = NA_real_
+    ))
+  }
+
+  parameter <- to_est(dataset$value, scale)
+  lp <- dataset$loglik
+  mcap_res <- mcap_checked(lp, parameter, lambda = 0.75)
+
+  with(mcap_res, {
+    if (is.infinite(ci[1])) ci[1] <- min(parameter)
+    if (is.infinite(ci[2])) ci[2] <- max(parameter)
+
+    fit |>
       mutate(
-        ci_1 = ci[1],
-        ci_2 = ci[2],
+        parameter = from_est(parameter, scale),
+        ci_1 = from_est(ci[1], scale),
+        ci_2 = from_est(ci[2], scale),
+        ci_1_truncated = ci_truncated[["lower"]],
+        ci_2_truncated = ci_truncated[["upper"]],
         delta = delta
       ) |>
       as_tibble()
   })
-  return(p)
 }
 
-filter_per_bin <- function(dataset, n_quantiles = 20, max_per_bin = 20, diff_LL = NULL, remove_outlier = TRUE, zscore = TRUE) {
-  column_name <- "value"
-  dataset <- dataset[complete.cases(dataset), ]
-  if (!is.null(diff_LL)) {
-    dataset <- dataset |> filter(loglik >= max(loglik) - diff_LL)
-  }
+#' Read one profile-likelihood CSV, keep the acceptable region (mirroring the
+#' "mode" bookkeeping column present in some refined profile files but not
+#' others), and compute the MCAP-smoothed curve, its CI, and the per-value
+#' best-likelihood points (focal_profile_points()) for every parameter.
+analyze_profile <- function(profile_file, city, covariate_label, output_prefix) {
+  all_res <- read_csv(profile_file, show_col_types = FALSE)
+  all_res <- all_res |>
+    select(-any_of(c("flag", "loglik.se", "sample", "mode", "source_file"))) |>
+    filter(rho >= 0.01)
+  all_res <- all_res |> filter(alpha > 0, alpha <= 1)
 
-  dataset <- dataset |>
-    bin_by_quantile(column_name, n_quantiles) |>
-    group_by(quantile) |>
-    slice_max(loglik, n = max_per_bin) |>
+  smoothed_curves <- all_res |>
+    select(-delta) |>
+    pivot_longer(-any_of(c("loglik", "profile_var"))) |>
+    split(~name) |>
+    lapply(plot_mcap_binned_2, diff_LL = 20) |>
+    bind_rows(.id = "name") |>
+    rename(value = parameter)
+
+  ci_vals <- smoothed_curves |>
+    select(name, ci_1, ci_2) |>
+    distinct() |>
+    pivot_longer(-name, names_to = "name2") |>
+    rename(ci = value) |>
+    select(-name2)
+
+  mle_vals <- all_res |>
+    select(-delta) |>
+    pivot_longer(-any_of(c("loglik", "profile_var"))) |>
+    group_by(name) |>
+    slice_max(loglik) |>
     ungroup() |>
-    mutate(mid_val = (start + end) / 2) |>
-    # group_by(mid_val) |>
-    # summarize(loglik = mean(loglik)) |>
-    # ungroup() |>
-    remove_missing()
+    select(name, value) |>
+    rename(mle = value)
 
-  if (remove_outlier) {
-    if (zscore) {
-      dataset <- dataset |>
-        mutate(zscore = (!!sym(column_name) - mean(!!sym(column_name))) / (sd(!!sym(column_name)))) |>
-        filter(abs(zscore) <= 2)
-    } else {
-      col_vals <- dataset |> pull(column_name)
-      iqr <- IQR(col_vals)
-      q_min <- quantile(col_vals, 0.25) - 1.5 * iqr
-      q_max <- quantile(col_vals, 0.75) + 1.5 * iqr
-      dataset <- dataset |> filter(!!sym(column_name) >= q_min, !!sym(column_name) <= q_max)
-    }
-  }
+  smoothed_curves <- smoothed_curves |>
+    left_join(mle_vals, by = "name") |>
+    mutate(label = fmt_mle_ci(mle, ci_1, ci_2, ci_1_truncated, ci_2_truncated, delta))
+
+  smoothed_curves |>
+    select(name, mle, ci_1, ci_2, ci_1_truncated, ci_2_truncated, delta) |>
+    distinct() |>
+    mutate(
+      label = fmt_mle_ci(mle, ci_1, ci_2, ci_1_truncated, ci_2_truncated, delta),
+      city = city, covariate = covariate_label
+    ) |>
+    select(city, covariate, name, label) |>
+    write_csv(str_glue("figures/{output_prefix}_parameters_profile.csv"))
+
+  # Same reduction (and same possibly-widened likelihood window) as
+  # plot_mcap_binned_2() above, so the plotted points match what the MCAP
+  # curve was actually fit to; see focal_profile_points() and "Plot
+  # conventions" above.
+  binned <- all_res |>
+    select(-delta) |>
+    pivot_longer(-any_of(c("loglik", "profile_var"))) |>
+    split(~name) |>
+    lapply(focal_profile_points, diff_LL = 20) |>
+    bind_rows(.id = "name")
+
+  # Reference for relative log-likelihood: the true (unrestricted) MLE's own
+  # raw log-likelihood -- the same single best-fit row used for mle_vals
+  # above, not the (per-panel, noisier) loess-smoothed curve maximum.
+  mle_loglik <- max(all_res$loglik)
+
+  list(
+    binned = binned, smoothed_curves = smoothed_curves, ci_vals = ci_vals,
+    mle_vals = mle_vals, mle_loglik = mle_loglik
+  )
 }
 
+#' Subtract the true MLE's log-likelihood (a single scalar, shared by every
+#' panel -- see analyze_profile()) from `loglik`/`smoothed`, for
+#' relative-log-likelihood plotting (see "Plot conventions").
+apply_relative_loglik <- function(binned, smoothed_curves, mle_loglik) {
+  list(
+    binned = binned |> mutate(loglik = loglik - mle_loglik),
+    smoothed_curves = smoothed_curves |> mutate(smoothed = smoothed - mle_loglik)
+  )
+}
 
-all_res |>
-  select(-delta) |>
-  pivot_longer(-loglik) |>
-  split(~name) |>
-  lapply(plot_mcap_binned_2, max_per_bin = 10) |>
-  bind_rows(.id = "name") |>
-  rename(value = parameter) -> smoothed_curves
+#' Compute a shared y-limit from the actual (post-relative) data being
+#' plotted, rather than a guessed fixed window -- a real "global y-axis"
+#' that adapts to whatever names_subset/profile is passed in, with a little
+#' padding and always including 0 (the MLE's own level).
+relative_ylim <- function(binned, smoothed_curves, pad = 0.5) {
+  vals <- c(binned$loglik, smoothed_curves$smoothed, 0)
+  vals <- vals[is.finite(vals)]
+  range(vals) + c(-pad, pad)
+}
 
+#' Profile-likelihood plot: points (raw MC loglik evaluations) + MCAP-smoothed
+#' curve + solid MLE line + dashed CI lines + a compact "mle [ci_1, ci_2]"
+#' annotation in each panel's top-left corner. One facet per parameter;
+#' `names_subset = NULL` plots every parameter in one grid. `relative = TRUE`
+#' (default) plots log-likelihood relative to the true MLE (see
+#' analyze_profile()), with a shared y-axis across panels (`ylim = NULL`
+#' computes it from the plotted data via relative_ylim(); pass an explicit
+#' `c(low, high)` to fix it, e.g. for comparing multiple saved figures) so
+#' identifiability is comparable across parameters; x stays free per panel.
+plot_profile_group <- function(profile, names_subset = NULL, base_size = 22, label_size = 5,
+                               relative = TRUE, ylim = NULL) {
+  binned <- profile$binned
+  smoothed_curves <- profile$smoothed_curves
+  ci_vals <- profile$ci_vals
+  mle_vals <- profile$mle_vals
+
+  if (!is.null(names_subset)) {
+    binned <- binned |> filter(name %in% names_subset)
+    smoothed_curves <- smoothed_curves |> filter(name %in% names_subset)
+    ci_vals <- ci_vals |> filter(name %in% names_subset)
+    mle_vals <- mle_vals |> filter(name %in% names_subset)
+  }
+
+  y_lab <- "Log-likelihood"
+  if (relative) {
+    rel <- apply_relative_loglik(binned, smoothed_curves, profile$mle_loglik)
+    binned <- rel$binned
+    smoothed_curves <- rel$smoothed_curves
+    y_lab <- "Relative log-likelihood"
+    if (is.null(ylim)) ylim <- relative_ylim(binned, smoothed_curves)
+  }
+
+  # The global MLE's own point (see analyze_profile()) usually isn't part of
+  # THIS parameter's own profile_var subset, so it's not among `binned`'s
+  # points -- draw it explicitly rather than relying on it to show up by
+  # coincidence, so the vline always has a visible point to go with it.
+  mle_vals <- mle_vals |> mutate(mle_y = if (relative) 0 else profile$mle_loglik)
+
+  # Bottom-center anchor per panel: mean of the smoothed curve's own x-range
+  # approximates each free-x panel's horizontal midpoint.
+  labels <- smoothed_curves |>
+    group_by(name) |>
+    summarize(label = first(label), xpos = mean(range(value)), .groups = "drop")
+
+  p <- binned |>
+    left_join(smoothed_curves |> select(name, ci_1, ci_2, delta) |> distinct(), by = "name") |>
+    ggplot(aes(x = value, y = loglik)) +
+    facet_wrap(~name,
+      scales = if (relative) "free_x" else "free",
+      labeller = labeller(name = as_labeller(parameter_labels, label_parsed))
+    ) +
+    geom_point(size = 0.6, alpha = 0.4) +
+    geom_line(aes(y = smoothed), data = smoothed_curves, color = okabe_ito[["blue"]], linewidth = 0.7) +
+    geom_vline(aes(xintercept = mle), data = mle_vals, color = okabe_ito[["vermillion"]], linewidth = 0.5, linetype = "solid") +
+    geom_point(aes(x = mle, y = mle_y), data = mle_vals, inherit.aes = FALSE, color = okabe_ito[["vermillion"]], size = 1.3) +
+    geom_vline(aes(xintercept = ci), data = ci_vals, color = okabe_ito[["orange"]], linewidth = 0.5, linetype = "dashed") +
+    geom_label(aes(x = xpos, y = -Inf, label = label),
+      data = labels, inherit.aes = FALSE,
+      hjust = 0.5, vjust = -0.3, size = label_size,
+      fill = "white", alpha = 0.7, linewidth = 0,
+      label.padding = unit(0.12, "lines")
+    ) +
+    theme_profile(base_size) +
+    labs(x = "Parameter value", y = y_lab)
+
+  if (relative) {
+    p <- p + coord_cartesian(ylim = ylim)
+  }
+  p
+}
+
+#' Same diagnostic as plot_profile_group(), but on each parameter's
+#' *estimation* scale (log/logit/identity; see param_scale()) instead of its
+#' natural scale. MCAP's loess/quadratic fit assumes it's fitting an
+#' approximately quadratic surface on THIS scale, so a misbehaved
+#' estimation -- a bad loess fit, a boundary artifact, a non-monotonic wiggle
+#' -- is best diagnosed here; the natural-scale plot can look fine even when
+#' the underlying fit is not, since back-transforming can visually smooth
+#' over problems. The MLE/CI annotation stays in natural-scale units (same
+#' label as the natural-scale plot) so the two are easy to cross-reference.
+plot_profile_group_transformed <- function(profile, names_subset = NULL, base_size = 22, label_size = 5,
+                                           relative = TRUE, ylim = NULL) {
+  binned <- profile$binned
+  smoothed_curves <- profile$smoothed_curves
+  ci_vals <- profile$ci_vals
+  mle_vals <- profile$mle_vals
+
+  if (!is.null(names_subset)) {
+    binned <- binned |> filter(name %in% names_subset)
+    smoothed_curves <- smoothed_curves |> filter(name %in% names_subset)
+    ci_vals <- ci_vals |> filter(name %in% names_subset)
+    mle_vals <- mle_vals |> filter(name %in% names_subset)
+  }
+
+  y_lab <- "Log-likelihood"
+  if (relative) {
+    rel <- apply_relative_loglik(binned, smoothed_curves, profile$mle_loglik)
+    binned <- rel$binned
+    smoothed_curves <- rel$smoothed_curves
+    y_lab <- "Relative log-likelihood"
+    if (is.null(ylim)) ylim <- relative_ylim(binned, smoothed_curves)
+  }
+
+  binned <- binned |> mutate(value = to_est(value, param_scale(name)))
+  smoothed_curves <- smoothed_curves |>
+    mutate(
+      value = to_est(value, param_scale(name)),
+      ci_1 = to_est(ci_1, param_scale(name)),
+      ci_2 = to_est(ci_2, param_scale(name))
+    )
+  ci_vals <- ci_vals |> mutate(ci = to_est(ci, param_scale(name)))
+  mle_vals <- mle_vals |>
+    mutate(
+      mle = to_est(mle, param_scale(name)),
+      mle_y = if (relative) 0 else profile$mle_loglik
+    )
+
+  # Bottom-center anchor per panel: mean of the smoothed curve's own x-range
+  # approximates each free-x panel's horizontal midpoint.
+  labels <- smoothed_curves |>
+    group_by(name) |>
+    summarize(label = first(label), xpos = mean(range(value)), .groups = "drop")
+  facet_labels <- setNames(
+    paste0(unique(binned$name), " (", param_scale(unique(binned$name)), ")"),
+    unique(binned$name)
+  )
+
+  p <- binned |>
+    left_join(smoothed_curves |> select(name, ci_1, ci_2, delta) |> distinct(), by = "name") |>
+    ggplot(aes(x = value, y = loglik)) +
+    facet_wrap(~name,
+      scales = if (relative) "free_x" else "free",
+      labeller = labeller(name = facet_labels)
+    ) +
+    geom_point(size = 0.6, alpha = 0.4) +
+    geom_line(aes(y = smoothed), data = smoothed_curves, color = okabe_ito[["blue"]], linewidth = 0.7) +
+    geom_vline(aes(xintercept = mle), data = mle_vals, color = okabe_ito[["vermillion"]], linewidth = 0.5, linetype = "solid") +
+    geom_vline(aes(xintercept = ci), data = ci_vals, color = okabe_ito[["orange"]], linewidth = 0.5, linetype = "dashed") +
+    geom_label(aes(x = xpos, y = -Inf, label = label),
+      data = labels, inherit.aes = FALSE,
+      hjust = 0.5, vjust = -0.3, size = label_size,
+      fill = "white", alpha = 0.7, linewidth = 0,
+      label.padding = unit(0.12, "lines")
+    ) +
+    theme_profile(base_size) +
+    labs(x = "Parameter value (estimation scale)", y = y_lab)
+
+  if (relative) {
+    p <- p + coord_cartesian(ylim = ylim)
+  }
+  p
+}
+
+#' Draw a parameter-group plot, print it (so it renders in the document), and
+#' save it to `filename`.
+save_profile_plot <- function(profile, names_subset, filename, label_size = 5, base_size = 22,
+                              width = 14, height = 14, dpi = 600) {
+  p <- plot_profile_group(profile, names_subset, base_size = base_size, label_size = label_size)
+  print(p)
+  ggsave(filename, plot = p, width = width, height = height, dpi = dpi)
+  invisible(p)
+}
 ```
+
+# Ahmedabad, relative humidity
 
 ```{r, fig.height = 20, fig.width = 20, eval = TRUE}
-ci_vals <- smoothed_curves |>
-  select(name, ci_1, ci_2) |>
-  distinct() |>
-  pivot_longer(-name, names_to = "name2") |>
-  rename(ci = value) |>
-  select(-name2)
+ahmedabad_rh <- analyze_profile(
+  "aggregated_results/all_profiles.csv",
+  city = "Ahmedabad", covariate_label = "Relative humidity", output_prefix = "Ahmedabad_RH"
+)
 
-mle_vals <- all_res |>
-  select(-delta) |>
-  pivot_longer(-loglik) |>
-  group_by(name) |>
-  slice_max(loglik) |>
-  ungroup() |>
-  select(name, value) |>
-  rename(mle = value)
+print(plot_profile_group(ahmedabad_rh, base_size = 12, label_size = 5))
+print(plot_profile_group_transformed(ahmedabad_rh, base_size = 12, label_size = 5))
 
-smoothed_curves <- smoothed_curves |>
-  left_join(mle_vals) |>
-  mutate(
-    label = paste(
-      "MLE:", round(mle, digits = 4), paste0("CI: (", paste0(round(ci_1, digits = 4), ",", round(ci_2, digits = 4), ")"))
-    )
-  ) |>
-  group_by(name) |>
-  mutate(,
-    xpos = mean(value),
-    ypos = min(smoothed) - 1
-  )
-
-print(smoothed_curves)
-print(ci_vals)
-print(mle_vals)
-
-smoothed_curves |>
-  select(name, mle, ci_1, ci_2) |>
-  distinct() |>
-  mutate(
-    label = paste(
-      round(mle, digits = 4), paste0("(", paste0(round(ci_1, digits = 4), ",", round(ci_2, digits = 4), ")"))
-    )
-  ) |>
-  mutate(city = "Ahmedabad", covariate = "Relative humidity") |>
-  select(city, covariate, name, label) |>
-  write_csv("figures/Ahmedabad_RH_parameters_profile.csv")
-all_res |>
-  select(-delta) |>
-  pivot_longer(-loglik) |>
-  split(~name) |>
-  lapply(filter_per_bin, max_per_bin = 10) |>
-  bind_rows(.id = "name") |>
-  left_join(smoothed_curves |> select(name, ci_1, ci_2, delta) |> distinct()) |>
-  # filter(loglik >= max(loglik) - delta - 1) |>
-  ggplot(aes(x = value, y = loglik)) +
-  facet_wrap(~name, scales = "free") +
-  geom_point() +
-  geom_line(aes(y = smoothed), data = smoothed_curves, color = "blue") +
-  geom_vline(aes(xintercept = ci), data = ci_vals, linetype = "dashed") +
-  geom_label(aes(label = label, x = xpos, y = ypos), data = smoothed_curves, inherit.aes = FALSE, size = 3) +
-  theme_bw(12, base_family = "sans") +
-  labs(x = "Parameter value", y = "Log-likelihood") +
-  theme(
-    panel.grid.minor = element_blank(),
-    text = element_text(family = "sans")
-  )
-
-all_res |>
-  select(-delta) |>
-  pivot_longer(-loglik) |>
-  split(~name) |>
-  lapply(filter_per_bin, max_per_bin = 10) |>
-  bind_rows(.id = "name") |>
-  filter(name %in% c("b1", "b2", "b3", "b4", "b5", "b6", "bH", "betaOUT", "alpha")) |>
-  left_join(smoothed_curves |> select(name, ci_1, ci_2, delta) |> distinct()) |>
-  # filter(loglik >= max(loglik) - delta - 1) |>
-  ggplot(aes(x = value, y = loglik)) +
-  facet_wrap(~name, scales = "free") +
-  geom_point() +
-  geom_line(aes(y = smoothed), data = smoothed_curves |> filter(name %in% c("b1", "b2", "b3", "b4", "b5", "b6", "bH", "betaOUT", "alpha")), color = "blue") +
-  geom_vline(aes(xintercept = ci), data = ci_vals |> filter(name %in% c("b1", "b2", "b3", "b4", "b5", "b6", "bH", "betaOUT", "alpha")), linetype = "dashed") +
-  geom_label(aes(label = label, x = xpos, y = ypos), data = smoothed_curves |> filter(name %in% c("b1", "b2", "b3", "b4", "b5", "b6", "bH", "betaOUT", "alpha")), inherit.aes = FALSE, size = 5) +
-  theme_bw(22, base_family = "sans") +
-  labs(x = "Parameter value", y = "Log-likelihood") +
-  theme(
-    panel.grid.minor = element_blank(),
-    text = element_text(family = "sans")
-  )
-
-ggsave("figures/profile_Ahmedabad_RH_transmission.pdf", width = 14, height = 14, dpi = 600)
-
-all_res |>
-  select(-delta) |>
-  pivot_longer(-loglik) |>
-  split(~name) |>
-  lapply(filter_per_bin, max_per_bin = 10) |>
-  bind_rows(.id = "name") |>
-  filter(name %in% c("S1_0", "S2_0", "E_0", "I1_0", "I2_0", "F_0", "K_0")) |>
-  left_join(smoothed_curves |> select(name, ci_1, ci_2, delta) |> distinct()) |>
-  # filter(loglik >= max(loglik) - delta - 1) |>
-  ggplot(aes(x = value, y = loglik)) +
-  facet_wrap(~name, scales = "free") +
-  geom_point() +
-  geom_line(aes(y = smoothed), data = smoothed_curves |> filter(name %in% c("S1_0", "S2_0", "E_0", "I1_0", "I2_0", "F_0", "K_0")), color = "blue") +
-  geom_vline(aes(xintercept = ci), data = ci_vals |> filter(name %in% c("S1_0", "S2_0", "E_0", "I1_0", "I2_0", "F_0", "K_0")), linetype = "dashed") +
-  geom_label(aes(label = label, x = xpos, y = ypos), data = smoothed_curves |> filter(name %in% c("S1_0", "S2_0", "E_0", "I1_0", "I2_0", "F_0", "K_0")), inherit.aes = FALSE, size = 5) +
-  theme_bw(22, base_family = "sans") +
-  labs(x = "Parameter value", y = "Log-likelihood") +
-  theme(
-    panel.grid.minor = element_blank(),
-    text = element_text(family = "sans")
-  )
-
-ggsave("figures/profile_Ahmedabad_RH_initial.pdf", width = 14, height = 14, dpi = 600)
-
-
-all_res |>
-  select(-delta) |>
-  pivot_longer(-loglik) |>
-  split(~name) |>
-  lapply(filter_per_bin, max_per_bin = 10) |>
-  bind_rows(.id = "name") |>
-  filter(name %in% c("muEI1", "muS2S1", "muI1S2", "muI2S2", "q0", "rho", "tau", "sigOBS", "sigPRO")) |>
-  left_join(smoothed_curves |> select(name, ci_1, ci_2, delta) |> distinct()) |>
-  # filter(loglik >= max(loglik) - delta - 1) |>
-  ggplot(aes(x = value, y = loglik)) +
-  facet_wrap(~name, scales = "free") +
-  geom_point() +
-  geom_line(aes(y = smoothed), data = smoothed_curves |> filter(name %in% c("muEI1", "muS2S1", "muI1S2", "muI2S2", "q0", "rho", "tau", "sigOBS", "sigPRO")), color = "blue") +
-  geom_vline(aes(xintercept = ci), data = ci_vals |> filter(name %in% c("muEI1", "muS2S1", "muI1S2", "muI2S2", "q0", "rho", "tau", "sigOBS", "sigPRO")), linetype = "dashed") +
-  geom_label(aes(label = label, x = xpos, y = ypos), data = smoothed_curves |> filter(name %in% c("muEI1", "muS2S1", "muI1S2", "muI2S2", "q0", "rho", "tau", "sigOBS", "sigPRO")), inherit.aes = FALSE, size = 5) +
-  theme_bw(22, base_family = "sans") +
-  labs(x = "Parameter value", y = "Log-likelihood") +
-  theme(
-    panel.grid.minor = element_blank(),
-    text = element_text(family = "sans")
-  )
-
-ggsave("figures/profile_Ahmedabad_RH_immunity.pdf", width = 14, height = 14, dpi = 600)
-
+save_profile_plot(ahmedabad_rh, param_groups$transmission, "figures/profile_Ahmedabad_RH_transmission.pdf")
+save_profile_plot(ahmedabad_rh, param_groups$initial, "figures/profile_Ahmedabad_RH_initial.pdf")
+save_profile_plot(ahmedabad_rh, param_groups$immunity, "figures/profile_Ahmedabad_RH_immunity.pdf")
 ```
 
-```{r, eval = TRUE}
-all_res <- read_csv("aggregated_results/profile_Ahmedabad_Max_Temp_1997_2011_9_9.csv") |>
-  select(-c(flag, loglik.se, sample)) |>
-  filter(rho >= 0.01)
+# Ahmedabad, maximum temperature
 
-all_res |>
-  select(-delta) |>
-  pivot_longer(-loglik) |>
-  split(~name) |>
-  lapply(plot_mcap_binned_2, max_per_bin = 10) |>
-  bind_rows(.id = "name") |>
-  rename(value = parameter) -> smoothed_curves
+```{r, fig.height = 20, fig.width = 20, eval = FALSE}
+ahmedabad_temp <- analyze_profile(
+  "aggregated_results/profile_Ahmedabad_Max_Temp_1997_2011_9_9.csv",
+  city = "Ahmedabad", covariate_label = "Maximum temperature", output_prefix = "Ahmedabad_Max_Temp"
+)
+print(plot_profile_group(ahmedabad_temp, base_size = 12, label_size = 5))
 
-ci_vals <- smoothed_curves |>
-  select(name, ci_1, ci_2) |>
-  distinct() |>
-  pivot_longer(-name, names_to = "name2") |>
-  rename(ci = value) |>
-  select(-name2)
+print(plot_profile_group_transformed(ahmedabad_temp, base_size = 12, label_size = 5))
 
-mle_vals <- all_res |>
-  select(-delta) |>
-  pivot_longer(-loglik) |>
-  group_by(name) |>
-  slice_max(loglik) |>
-  ungroup() |>
-  select(name, value) |>
-  rename(mle = value)
-
-smoothed_curves <- smoothed_curves |>
-  left_join(mle_vals) |>
-  mutate(
-    label = paste(
-      "MLE:", round(mle, digits = 4), paste0("CI: (", paste0(round(ci_1, digits = 4), ",", round(ci_2, digits = 4), ")"))
-    )
-  ) |>
-  group_by(name) |>
-  mutate(,
-    xpos = mean(value),
-    ypos = min(smoothed) - 1
-  )
-smoothed_curves |>
-  select(name, mle, ci_1, ci_2) |>
-  distinct() |>
-  mutate(
-    label = paste(
-      round(mle, digits = 4), paste0("(", paste0(round(ci_1, digits = 4), ",", round(ci_2, digits = 4), ")"))
-    )
-  ) |>
-  mutate(city = "Ahmedabad", covariate = "Maximum temperature") |>
-  select(city, covariate, name, label) |>
-  write_csv("figures/Ahmedabad_Max_Temp_parameters_profile.csv")
-
-all_res |>
-  select(-delta) |>
-  pivot_longer(-loglik) |>
-  split(~name) |>
-  lapply(filter_per_bin, max_per_bin = 10) |>
-  bind_rows(.id = "name") |>
-  filter(name %in% c("b1", "b2", "b3", "b4", "b5", "b6", "bH", "betaOUT", "alpha")) |>
-  left_join(smoothed_curves |> select(name, ci_1, ci_2, delta) |> distinct()) |>
-  # filter(loglik >= max(loglik) - delta - 1) |>
-  ggplot(aes(x = value, y = loglik)) +
-  facet_wrap(~name, scales = "free") +
-  geom_point() +
-  geom_line(aes(y = smoothed), data = smoothed_curves |> filter(name %in% c("b1", "b2", "b3", "b4", "b5", "b6", "bH", "betaOUT", "alpha")), color = "blue") +
-  geom_vline(aes(xintercept = ci), data = ci_vals |> filter(name %in% c("b1", "b2", "b3", "b4", "b5", "b6", "bH", "betaOUT", "alpha")), linetype = "dashed") +
-  geom_label(aes(label = label, x = xpos, y = ypos), data = smoothed_curves |> filter(name %in% c("b1", "b2", "b3", "b4", "b5", "b6", "bH", "betaOUT", "alpha")), inherit.aes = FALSE, size = 5) +
-  theme_bw(22, base_family = "sans") +
-  labs(x = "Parameter value", y = "Log-likelihood") +
-  theme(
-    panel.grid.minor = element_blank(),
-    text = element_text(family = "sans")
-  )
-
-ggsave("figures/profile_Ahmedabad_Max_Temp_transmission.pdf", width = 14, height = 14, dpi = 600)
-
-all_res |>
-  select(-delta) |>
-  pivot_longer(-loglik) |>
-  split(~name) |>
-  lapply(filter_per_bin, max_per_bin = 10) |>
-  bind_rows(.id = "name") |>
-  filter(name %in% c("S1_0", "S2_0", "E_0", "I1_0", "I2_0", "F_0", "K_0")) |>
-  left_join(smoothed_curves |> select(name, ci_1, ci_2, delta) |> distinct()) |>
-  # filter(loglik >= max(loglik) - delta - 1) |>
-  ggplot(aes(x = value, y = loglik)) +
-  facet_wrap(~name, scales = "free") +
-  geom_point() +
-  geom_line(aes(y = smoothed), data = smoothed_curves |> filter(name %in% c("S1_0", "S2_0", "E_0", "I1_0", "I2_0", "F_0", "K_0")), color = "blue") +
-  geom_vline(aes(xintercept = ci), data = ci_vals |> filter(name %in% c("S1_0", "S2_0", "E_0", "I1_0", "I2_0", "F_0", "K_0")), linetype = "dashed") +
-  geom_label(aes(label = label, x = xpos, y = ypos), data = smoothed_curves |> filter(name %in% c("S1_0", "S2_0", "E_0", "I1_0", "I2_0", "F_0", "K_0")), inherit.aes = FALSE, size = 5) +
-  theme_bw(22, base_family = "sans") +
-  labs(x = "Parameter value", y = "Log-likelihood") +
-  theme(
-    panel.grid.minor = element_blank(),
-    text = element_text(family = "sans")
-  )
-
-ggsave("figures/profile_Ahmedabad_Max_Temp_initial.pdf", width = 14, height = 14, dpi = 600)
-
-
-all_res |>
-  select(-delta) |>
-  pivot_longer(-loglik) |>
-  split(~name) |>
-  lapply(filter_per_bin, max_per_bin = 10) |>
-  bind_rows(.id = "name") |>
-  filter(name %in% c("muEI1", "muS2S1", "muI1S2", "muI2S2", "q0", "rho", "tau", "sigOBS", "sigPRO")) |>
-  left_join(smoothed_curves |> select(name, ci_1, ci_2, delta) |> distinct()) |>
-  # filter(loglik >= max(loglik) - delta - 1) |>
-  ggplot(aes(x = value, y = loglik)) +
-  facet_wrap(~name, scales = "free") +
-  geom_point() +
-  geom_line(aes(y = smoothed), data = smoothed_curves |> filter(name %in% c("muEI1", "muS2S1", "muI1S2", "muI2S2", "q0", "rho", "tau", "sigOBS", "sigPRO")), color = "blue") +
-  geom_vline(aes(xintercept = ci), data = ci_vals |> filter(name %in% c("muEI1", "muS2S1", "muI1S2", "muI2S2", "q0", "rho", "tau", "sigOBS", "sigPRO")), linetype = "dashed") +
-  geom_label(aes(label = label, x = xpos, y = ypos), data = smoothed_curves |> filter(name %in% c("muEI1", "muS2S1", "muI1S2", "muI2S2", "q0", "rho", "tau", "sigOBS", "sigPRO")), inherit.aes = FALSE, size = 5) +
-  theme_bw(22, base_family = "sans") +
-  labs(x = "Parameter value", y = "Log-likelihood") +
-  theme(
-    panel.grid.minor = element_blank(),
-    text = element_text(family = "sans")
-  )
-
-ggsave("figures/profile_Ahmedabad_Max_Temp_immunity.pdf", width = 14, height = 14, dpi = 600)
-
+save_profile_plot(ahmedabad_temp, param_groups$transmission, "figures/profile_Ahmedabad_Max_Temp_transmission.pdf")
+save_profile_plot(ahmedabad_temp, param_groups$initial, "figures/profile_Ahmedabad_Max_Temp_initial.pdf")
+save_profile_plot(ahmedabad_temp, param_groups$immunity, "figures/profile_Ahmedabad_Max_Temp_immunity.pdf")
 ```
 
-```{r, eval = TRUE}
-all_res <- read_csv("aggregated_results/profile_Surat_hadISD_1997_2016_7_7.csv") |>
-  select(-c(flag, loglik.se, sample)) |>
-  filter(rho >= 0.01)
+# Surat, relative humidity
 
-all_res |>
-  select(-delta) |>
-  pivot_longer(-loglik) |>
-  split(~name) |>
-  lapply(plot_mcap_binned_2, max_per_bin = 10) |>
-  bind_rows(.id = "name") |>
-  rename(value = parameter) -> smoothed_curves
+```{r, fig.height = 20, fig.width = 20, eval = FALSE}
+surat_rh <- analyze_profile(
+  "aggregated_results/profile_Surat_hadISD_1997_2016_7_7.csv",
+  city = "Surat", covariate_label = "Relative humidity", output_prefix = "Surat_RH"
+)
+print(plot_profile_group(surat_rh, base_size = 12, label_size = 5))
 
-ci_vals <- smoothed_curves |>
-  select(name, ci_1, ci_2) |>
-  distinct() |>
-  pivot_longer(-name, names_to = "name2") |>
-  rename(ci = value) |>
-  select(-name2)
+print(plot_profile_group_transformed(surat_rh, base_size = 12, label_size = 5))
 
-mle_vals <- all_res |>
-  select(-delta) |>
-  pivot_longer(-loglik) |>
-  group_by(name) |>
-  slice_max(loglik) |>
-  ungroup() |>
-  select(name, value) |>
-  rename(mle = value)
-
-smoothed_curves <- smoothed_curves |>
-  left_join(mle_vals) |>
-  mutate(
-    label = paste(
-      "MLE:", round(mle, digits = 4), paste0("CI: (", paste0(round(ci_1, digits = 4), ",", round(ci_2, digits = 4), ")"))
-    )
-  ) |>
-  group_by(name) |>
-  mutate(,
-    xpos = mean(value),
-    ypos = min(smoothed) - 1
-  )
-
-smoothed_curves |>
-  select(name, mle, ci_1, ci_2) |>
-  distinct() |>
-  mutate(
-    label = paste(
-      round(mle, digits = 4), paste0("(", paste0(round(ci_1, digits = 4), ",", round(ci_2, digits = 4), ")"))
-    )
-  ) |>
-  mutate(city = "Surat", covariate = "Relative humidity") |>
-  select(city, covariate, name, label) |>
-  write_csv("figures/Surat_RH_parameters_profile.csv")
-
-all_res |>
-  select(-delta) |>
-  pivot_longer(-loglik) |>
-  split(~name) |>
-  lapply(filter_per_bin, max_per_bin = 10) |>
-  bind_rows(.id = "name") |>
-  filter(name %in% c("b1", "b2", "b3", "b4", "b5", "b6", "bH", "betaOUT", "alpha")) |>
-  left_join(smoothed_curves |> select(name, ci_1, ci_2, delta) |> distinct()) |>
-  # filter(loglik >= max(loglik) - delta - 1) |>
-  ggplot(aes(x = value, y = loglik)) +
-  facet_wrap(~name, scales = "free") +
-  geom_point() +
-  geom_line(aes(y = smoothed), data = smoothed_curves |> filter(name %in% c("b1", "b2", "b3", "b4", "b5", "b6", "bH", "betaOUT", "alpha")), color = "blue") +
-  geom_vline(aes(xintercept = ci), data = ci_vals |> filter(name %in% c("b1", "b2", "b3", "b4", "b5", "b6", "bH", "betaOUT", "alpha")), linetype = "dashed") +
-  geom_label(aes(label = label, x = xpos, y = ypos), data = smoothed_curves |> filter(name %in% c("b1", "b2", "b3", "b4", "b5", "b6", "bH", "betaOUT", "alpha")), inherit.aes = FALSE, size = 5) +
-  theme_bw(22, base_family = "sans") +
-  labs(x = "Parameter value", y = "Log-likelihood") +
-  theme(
-    panel.grid.minor = element_blank(),
-    text = element_text(family = "sans")
-  )
-
-ggsave("figures/profile_Surat_RH_transmission.pdf", width = 14, height = 14, dpi = 600)
-
-all_res |>
-  select(-delta) |>
-  pivot_longer(-loglik) |>
-  split(~name) |>
-  lapply(filter_per_bin, max_per_bin = 10) |>
-  bind_rows(.id = "name") |>
-  filter(name %in% c("S1_0", "S2_0", "E_0", "I1_0", "I2_0", "F_0", "K_0")) |>
-  left_join(smoothed_curves |> select(name, ci_1, ci_2, delta) |> distinct()) |>
-  # filter(loglik >= max(loglik) - delta - 1) |>
-  ggplot(aes(x = value, y = loglik)) +
-  facet_wrap(~name, scales = "free") +
-  geom_point() +
-  geom_line(aes(y = smoothed), data = smoothed_curves |> filter(name %in% c("S1_0", "S2_0", "E_0", "I1_0", "I2_0", "F_0", "K_0")), color = "blue") +
-  geom_vline(aes(xintercept = ci), data = ci_vals |> filter(name %in% c("S1_0", "S2_0", "E_0", "I1_0", "I2_0", "F_0", "K_0")), linetype = "dashed") +
-  geom_label(aes(label = label, x = xpos, y = ypos), data = smoothed_curves |> filter(name %in% c("S1_0", "S2_0", "E_0", "I1_0", "I2_0", "F_0", "K_0")), inherit.aes = FALSE, size = 5) +
-  theme_bw(22, base_family = "sans") +
-  labs(x = "Parameter value", y = "Log-likelihood") +
-  theme(
-    panel.grid.minor = element_blank(),
-    text = element_text(family = "sans")
-  )
-
-ggsave("figures/profile_Surat_RH_initial.pdf", width = 14, height = 14, dpi = 600)
-
-
-all_res |>
-  select(-delta) |>
-  pivot_longer(-loglik) |>
-  split(~name) |>
-  lapply(filter_per_bin, max_per_bin = 10) |>
-  bind_rows(.id = "name") |>
-  filter(name %in% c("muEI1", "muS2S1", "muI1S2", "muI2S2", "q0", "rho", "tau", "sigOBS", "sigPRO")) |>
-  left_join(smoothed_curves |> select(name, ci_1, ci_2, delta) |> distinct()) |>
-  # filter(loglik >= max(loglik) - delta - 1) |>
-  ggplot(aes(x = value, y = loglik)) +
-  facet_wrap(~name, scales = "free") +
-  geom_point() +
-  geom_line(aes(y = smoothed), data = smoothed_curves |> filter(name %in% c("muEI1", "muS2S1", "muI1S2", "muI2S2", "q0", "rho", "tau", "sigOBS", "sigPRO")), color = "blue") +
-  geom_vline(aes(xintercept = ci), data = ci_vals |> filter(name %in% c("muEI1", "muS2S1", "muI1S2", "muI2S2", "q0", "rho", "tau", "sigOBS", "sigPRO")), linetype = "dashed") +
-  geom_label(aes(label = label, x = xpos, y = ypos), data = smoothed_curves |> filter(name %in% c("muEI1", "muS2S1", "muI1S2", "muI2S2", "q0", "rho", "tau", "sigOBS", "sigPRO")), inherit.aes = FALSE, size = 5) +
-  theme_bw(22, base_family = "sans") +
-  labs(x = "Parameter value", y = "Log-likelihood") +
-  theme(
-    panel.grid.minor = element_blank(),
-    text = element_text(family = "sans")
-  )
-
-ggsave("figures/profile_Surat_RH_immunity.pdf", width = 14, height = 14, dpi = 600)
+save_profile_plot(surat_rh, param_groups$transmission, "figures/profile_Surat_RH_transmission.pdf")
+save_profile_plot(surat_rh, param_groups$initial, "figures/profile_Surat_RH_initial.pdf")
+save_profile_plot(surat_rh, param_groups$immunity, "figures/profile_Surat_RH_immunity.pdf")
 ```
 
-```{r, eval = TRUE}
-all_res <- read_csv("aggregated_results/profile_Surat_Max_Temp_1997_2016_5_9.csv") |>
-  select(-c(flag, loglik.se, sample)) |>
-  filter(rho >= 0.01)
+# Surat, maximum temperature
 
-all_res |>
-  select(-delta) |>
-  pivot_longer(-loglik) |>
-  split(~name) |>
-  lapply(plot_mcap_binned_2, max_per_bin = 10) |>
-  bind_rows(.id = "name") |>
-  rename(value = parameter) -> smoothed_curves
+```{r, fig.height = 20, fig.width = 20, eval = FALSE}
+surat_temp <- analyze_profile(
+  "aggregated_results/profile_Surat_Max_Temp_1997_2016_5_9.csv",
+  city = "Surat", covariate_label = "Maximum temperature", output_prefix = "Surat_Max_Temp"
+)
+print(plot_profile_group(surat_temp, base_size = 12, label_size = 5))
 
-ci_vals <- smoothed_curves |>
-  select(name, ci_1, ci_2) |>
-  distinct() |>
-  pivot_longer(-name, names_to = "name2") |>
-  rename(ci = value) |>
-  select(-name2)
+print(plot_profile_group_transformed(surat_temp, base_size = 12, label_size = 5))
 
-mle_vals <- all_res |>
-  select(-delta) |>
-  pivot_longer(-loglik) |>
-  group_by(name) |>
-  slice_max(loglik) |>
-  ungroup() |>
-  select(name, value) |>
-  rename(mle = value)
-
-smoothed_curves <- smoothed_curves |>
-  left_join(mle_vals) |>
-  mutate(
-    label = paste(
-      "MLE:", round(mle, digits = 4), paste0("CI: (", paste0(round(ci_1, digits = 4), ",", round(ci_2, digits = 4), ")"))
-    )
-  ) |>
-  group_by(name) |>
-  mutate(,
-    xpos = mean(value),
-    ypos = min(smoothed) - 1
-  )
-
-smoothed_curves |>
-  select(name, mle, ci_1, ci_2) |>
-  distinct() |>
-  mutate(
-    label = paste(
-      round(mle, digits = 4), paste0("(", paste0(round(ci_1, digits = 4), ",", round(ci_2, digits = 4), ")"))
-    )
-  ) |>
-  mutate(city = "Surat", covariate = "Maximum temperature") |>
-  select(city, covariate, name, label) |>
-  write_csv("figures/Surat_Max_Temp_parameters_profile.csv")
-
-all_res |>
-  select(-delta) |>
-  pivot_longer(-loglik) |>
-  split(~name) |>
-  lapply(filter_per_bin, max_per_bin = 10) |>
-  bind_rows(.id = "name") |>
-  filter(name %in% c("b1", "b2", "b3", "b4", "b5", "b6", "bH", "betaOUT", "alpha")) |>
-  left_join(smoothed_curves |> select(name, ci_1, ci_2, delta) |> distinct()) |>
-  # filter(loglik >= max(loglik) - delta - 1) |>
-  ggplot(aes(x = value, y = loglik)) +
-  facet_wrap(~name, scales = "free") +
-  geom_point() +
-  geom_line(aes(y = smoothed), data = smoothed_curves |> filter(name %in% c("b1", "b2", "b3", "b4", "b5", "b6", "bH", "betaOUT", "alpha")), color = "blue") +
-  geom_vline(aes(xintercept = ci), data = ci_vals |> filter(name %in% c("b1", "b2", "b3", "b4", "b5", "b6", "bH", "betaOUT", "alpha")), linetype = "dashed") +
-  geom_label(aes(label = label, x = xpos, y = ypos), data = smoothed_curves |> filter(name %in% c("b1", "b2", "b3", "b4", "b5", "b6", "bH", "betaOUT", "alpha")), inherit.aes = FALSE, size = 5) +
-  theme_bw(22, base_family = "sans") +
-  labs(x = "Parameter value", y = "Log-likelihood") +
-  theme(
-    panel.grid.minor = element_blank(),
-    text = element_text(family = "sans")
-  )
-
-ggsave("figures/profile_Surat_Max_Temp_transmission.pdf", width = 14, height = 14, dpi = 600)
-
-all_res |>
-  select(-delta) |>
-  pivot_longer(-loglik) |>
-  split(~name) |>
-  lapply(filter_per_bin, max_per_bin = 10) |>
-  bind_rows(.id = "name") |>
-  filter(name %in% c("S1_0", "S2_0", "E_0", "I1_0", "I2_0", "F_0", "K_0")) |>
-  left_join(smoothed_curves |> select(name, ci_1, ci_2, delta) |> distinct()) |>
-  # filter(loglik >= max(loglik) - delta - 1) |>
-  ggplot(aes(x = value, y = loglik)) +
-  facet_wrap(~name, scales = "free") +
-  geom_point() +
-  geom_line(aes(y = smoothed), data = smoothed_curves |> filter(name %in% c("S1_0", "S2_0", "E_0", "I1_0", "I2_0", "F_0", "K_0")), color = "blue") +
-  geom_vline(aes(xintercept = ci), data = ci_vals |> filter(name %in% c("S1_0", "S2_0", "E_0", "I1_0", "I2_0", "F_0", "K_0")), linetype = "dashed") +
-  geom_label(aes(label = label, x = xpos, y = ypos), data = smoothed_curves |> filter(name %in% c("S1_0", "S2_0", "E_0", "I1_0", "I2_0", "F_0", "K_0")), inherit.aes = FALSE, size = 5) +
-  theme_bw(22, base_family = "sans") +
-  labs(x = "Parameter value", y = "Log-likelihood") +
-  theme(
-    panel.grid.minor = element_blank(),
-    text = element_text(family = "sans")
-  )
-
-ggsave("figures/profile_Surat_Max_Temp_initial.pdf", width = 14, height = 14, dpi = 600)
-
-
-all_res |>
-  select(-delta) |>
-  pivot_longer(-loglik) |>
-  split(~name) |>
-  lapply(filter_per_bin, max_per_bin = 10) |>
-  bind_rows(.id = "name") |>
-  filter(name %in% c("muEI1", "muS2S1", "muI1S2", "muI2S2", "q0", "rho", "tau", "sigOBS", "sigPRO")) |>
-  left_join(smoothed_curves |> select(name, ci_1, ci_2, delta) |> distinct()) |>
-  # filter(loglik >= max(loglik) - delta - 1) |>
-  ggplot(aes(x = value, y = loglik)) +
-  facet_wrap(~name, scales = "free") +
-  geom_point() +
-  geom_line(aes(y = smoothed), data = smoothed_curves |> filter(name %in% c("muEI1", "muS2S1", "muI1S2", "muI2S2", "q0", "rho", "tau", "sigOBS", "sigPRO")), color = "blue") +
-  geom_vline(aes(xintercept = ci), data = ci_vals |> filter(name %in% c("muEI1", "muS2S1", "muI1S2", "muI2S2", "q0", "rho", "tau", "sigOBS", "sigPRO")), linetype = "dashed") +
-  geom_label(aes(label = label, x = xpos, y = ypos), data = smoothed_curves |> filter(name %in% c("muEI1", "muS2S1", "muI1S2", "muI2S2", "q0", "rho", "tau", "sigOBS", "sigPRO")), inherit.aes = FALSE, size = 5) +
-  theme_bw(22, base_family = "sans") +
-  labs(x = "Parameter value", y = "Log-likelihood") +
-  theme(
-    panel.grid.minor = element_blank(),
-    text = element_text(family = "sans")
-  )
-
-ggsave("figures/profile_Surat_Max_Temp_immunity.pdf", width = 14, height = 14, dpi = 600)
+save_profile_plot(surat_temp, param_groups$transmission, "figures/profile_Surat_Max_Temp_transmission.pdf")
+save_profile_plot(surat_temp, param_groups$initial, "figures/profile_Surat_Max_Temp_initial.pdf")
+save_profile_plot(surat_temp, param_groups$immunity, "figures/profile_Surat_Max_Temp_immunity.pdf")
 ```

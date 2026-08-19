@@ -170,7 +170,6 @@ plot_mcap_binned <- function(dataset, column_name, n_quantiles = 20, max_per_bin
   #   remove_missing()
 
 
-
   parameter <- dataset |> pull(column_name)
   lp <- dataset |> pull("loglik")
   mcap_res <- mcap(lp, parameter, lambda = 0.75)
@@ -214,4 +213,399 @@ plot_simple_CI <- function(dataset, column_name, n_quantiles = 20, max_per_bin =
   mcap_res$delta <- qchisq(0.95, df = 1) / 2
   p <- mcap_plot(mcap_res) + labs(y = "loglikelihood", x = column_name)
   return(p)
+}
+
+mcap_checked <- function(
+  lp,
+  parameter,
+  confidence = 0.95,
+  lambda = 0.75,
+  Ngrid = 1000,
+  external_mle = NULL,
+  edge_fraction = 0.05,
+  min_local_unique = 5
+) {
+  ok <- is.finite(lp) & is.finite(parameter)
+  lp <- lp[ok]
+  parameter <- parameter[ok]
+
+  ## ---- LOESS smoother ----
+
+  smooth_fit <- loess(
+    lp ~ parameter,
+    span = lambda,
+    degree = 2,
+    control = loess.control(surface = "direct")
+  )
+
+  parameter_grid <- seq(
+    min(parameter),
+    max(parameter),
+    length.out = Ngrid
+  )
+
+  smoothed_loglik <- predict(
+    smooth_fit,
+    newdata = data.frame(parameter = parameter_grid)
+  )
+
+  valid_grid <- is.finite(smoothed_loglik)
+
+  parameter_grid <- parameter_grid[valid_grid]
+  smoothed_loglik <- smoothed_loglik[valid_grid]
+
+  i_max <- which.max(smoothed_loglik)
+
+  smooth_arg_max <- parameter_grid[i_max]
+  smooth_ll_max <- smoothed_loglik[i_max]
+
+  ## Explored range actually supported by LOESS predictions
+  explored_range <- range(parameter_grid, na.rm = TRUE)
+
+  ## ---- External MLE diagnostic ----
+  ##
+  ## Calculate this before any possible early return so the
+  ## returned object always contains mle_gap.
+
+  mle_gap <- NA_real_
+
+  if (!is.null(external_mle)) {
+    ll_external <- predict(
+      smooth_fit,
+      newdata = data.frame(
+        parameter = external_mle
+      )
+    )
+
+    if (length(ll_external) == 1L && is.finite(ll_external)) {
+      mle_gap <- smooth_ll_max - ll_external
+    }
+  }
+
+  ## ---- Check edge maximum ----
+
+  parameter_range <- range(parameter, na.rm = TRUE)
+
+  edge_width <- edge_fraction * diff(parameter_range)
+
+  peak_at_edge <-
+    smooth_arg_max <= parameter_range[1] + edge_width ||
+      smooth_arg_max >= parameter_range[2] - edge_width
+
+  ## ---- LOESS-equivalent local weights ----
+
+  dist <- abs(parameter - smooth_arg_max)
+
+  n_local <- max(
+    3L,
+    ceiling(lambda * length(parameter))
+  )
+
+  # Avoid indexing beyond the available observations
+  n_local <- min(n_local, length(parameter))
+
+  cutoff_dist <- sort(dist)[n_local]
+
+  included <- dist <= cutoff_dist
+
+  n_unique_local <- length(
+    unique(parameter[included])
+  )
+
+  maxdist <- max(dist[included], na.rm = TRUE)
+
+  weight <- numeric(length(parameter))
+
+  if (is.finite(maxdist) && maxdist > 0) {
+    weight[included] <- (
+      1 -
+        (dist[included] / maxdist)^3
+    )^3
+  } else {
+    # Degenerate case: all included focal values are identical
+    weight[included] <- 1
+  }
+
+  ## ---- Local quadratic metamodel ----
+  ##
+  ## Parameterization:
+  ##
+  ##   lp = c - a * parameter^2 + b * parameter
+  ##
+  ## Therefore an upside-down parabola requires a > 0.
+
+  quadratic_fit <- lm(
+    lp ~ a + b,
+    weights = weight,
+    data = data.frame(
+      lp = lp,
+      b = parameter,
+      a = -parameter^2
+    )
+  )
+
+  a <- unname(coef(quadratic_fit)["a"])
+  b <- unname(coef(quadratic_fit)["b"])
+
+  concave <- is.finite(a) && a > 0
+
+  quadratic_stationary <- if (
+    is.finite(a) &&
+      is.finite(b) &&
+      a != 0
+  ) {
+    b / (2 * a)
+  } else {
+    NA_real_
+  }
+
+  quadratic_max <- if (concave) {
+    quadratic_stationary
+  } else {
+    NA_real_
+  }
+
+  quadratic_pred <- predict(
+    quadratic_fit,
+    newdata = data.frame(
+      b = parameter_grid,
+      a = -parameter_grid^2
+    )
+  )
+
+  ## ---- Initial diagnostics ----
+
+  status <- character()
+
+  if (!concave) {
+    status <- c(status, "non_concave")
+  }
+
+  if (peak_at_edge) {
+    status <- c(status, "peak_at_edge")
+  }
+
+  if (n_unique_local < min_local_unique) {
+    status <- c(status, "few_local_x")
+  }
+
+  ## ============================================================
+  ## Non-concave case
+  ## ============================================================
+  ##
+  ## The MCAP variance and cutoff formulas are not valid when
+  ## a <= 0. However, return the explored parameter range so that
+  ## downstream plotting/table code still has finite limits.
+  ##
+  ## IMPORTANT:
+  ## ci here is NOT a 95% MCAP CI. It is the explored profile range.
+  ## ============================================================
+
+  if (!concave) {
+    return(list(
+      lp = lp,
+      parameter = parameter,
+      confidence = confidence,
+      quadratic_fit = quadratic_fit,
+      quadratic_stationary = quadratic_stationary,
+      quadratic_max = quadratic_max,
+      smooth_fit = smooth_fit,
+      fit = data.frame(
+        parameter = parameter_grid,
+        smoothed = smoothed_loglik,
+        quadratic = quadratic_pred
+      ),
+      mle = smooth_arg_max,
+
+      ## Return finite explored limits rather than NA
+      ci = explored_range,
+
+      ## Both sides are range-limited, not inferential MCAP bounds
+      ci_truncated = c(
+        lower = TRUE,
+        upper = TRUE
+      ),
+
+      ## Explicitly indicate this is not a valid MCAP CI
+      ci_valid = FALSE,
+      ci_type = "explored_range",
+      explored_range = explored_range,
+      delta = NA_real_,
+      se_stat = NA_real_,
+      se_mc = NA_real_,
+      se = NA_real_,
+      a = a,
+      b = b,
+      concave = FALSE,
+      peak_at_edge = peak_at_edge,
+      n_unique_local = n_unique_local,
+      mle_gap = mle_gap,
+      status = unique(status)
+    ))
+  }
+
+  ## ============================================================
+  ## MC uncertainty
+  ## ============================================================
+
+  m <- vcov(quadratic_fit)
+
+  var_b <- m["b", "b"]
+  var_a <- m["a", "a"]
+  cov_ab <- m["a", "b"]
+
+  se_mc_squared <-
+    (1 / (4 * a^2)) *
+      (
+        var_b -
+          (2 * b / a) * cov_ab +
+          (b^2 / a^2) * var_a
+      )
+
+  se_stat_squared <- 1 / (2 * a)
+
+  se_total_squared <-
+    se_mc_squared +
+    se_stat_squared
+
+  delta <-
+    qchisq(confidence, df = 1) *
+      (a * se_mc_squared + 0.5)
+
+  ## ---- CI support ----
+
+  loglik_diff <-
+    smooth_ll_max -
+    smoothed_loglik
+
+  inside <- loglik_diff < delta
+
+  ## Check whether we actually crossed the threshold
+  ## before reaching either edge of the evaluated profile.
+
+  left_supported <- if (i_max > 1) {
+    any(!inside[seq_len(i_max - 1)])
+  } else {
+    FALSE
+  }
+
+  right_supported <- if (i_max < length(inside)) {
+    any(!inside[(i_max + 1):length(inside)])
+  } else {
+    FALSE
+  }
+
+  if (!left_supported) {
+    status <- c(status, "left_unbounded")
+  }
+
+  if (!right_supported) {
+    status <- c(status, "right_unbounded")
+  }
+
+  ## ---- CI endpoints ----
+  ##
+  ## If the threshold crossing exists, use the MCAP-supported
+  ## endpoint.
+  ##
+  ## If not, use the edge of the explored profile range and
+  ## mark that side as truncated.
+
+  if (any(inside)) {
+    inside_range <- range(
+      parameter_grid[inside],
+      na.rm = TRUE
+    )
+  } else {
+    inside_range <- c(
+      smooth_arg_max,
+      smooth_arg_max
+    )
+  }
+
+  ci_lower <- if (left_supported) {
+    inside_range[1]
+  } else {
+    explored_range[1]
+  }
+
+  ci_upper <- if (right_supported) {
+    inside_range[2]
+  } else {
+    explored_range[2]
+  }
+
+  ci <- c(
+    lower = ci_lower,
+    upper = ci_upper
+  )
+
+  ci_truncated <- c(
+    lower = !left_supported,
+    upper = !right_supported
+  )
+
+  ## CI interpretation
+  ##
+  ## If at least one side is truncated, the MCAP confidence
+  ## set extends beyond the explored parameter range.
+
+  ci_type <- if (
+    left_supported &&
+      right_supported
+  ) {
+    "mcap"
+  } else if (
+    !left_supported &&
+      !right_supported
+  ) {
+    "mcap_beyond_both_ranges"
+  } else if (!left_supported) {
+    "mcap_beyond_lower_range"
+  } else {
+    "mcap_beyond_upper_range"
+  }
+
+  ## A concave fit gives a valid MCAP construction.
+  ## "Valid" here does not mean both limits were numerically
+  ## observed within the explored domain.
+  ci_valid <- TRUE
+
+  if (length(status) == 0) {
+    status <- "ok"
+  }
+
+  ## ---- Return ----
+
+  list(
+    lp = lp,
+    parameter = parameter,
+    confidence = confidence,
+    quadratic_fit = quadratic_fit,
+    quadratic_stationary = quadratic_stationary,
+    quadratic_max = quadratic_max,
+    smooth_fit = smooth_fit,
+    fit = data.frame(
+      parameter = parameter_grid,
+      smoothed = smoothed_loglik,
+      quadratic = quadratic_pred
+    ),
+    mle = smooth_arg_max,
+    ci = ci,
+    ci_truncated = ci_truncated,
+    ci_valid = ci_valid,
+    ci_type = ci_type,
+    explored_range = explored_range,
+    delta = delta,
+    a = a,
+    b = b,
+    concave = TRUE,
+    se_stat = sqrt(se_stat_squared),
+    se_mc = sqrt(se_mc_squared),
+    se = sqrt(se_total_squared),
+    peak_at_edge = peak_at_edge,
+    n_unique_local = n_unique_local,
+    mle_gap = mle_gap,
+    status = unique(status)
+  )
 }

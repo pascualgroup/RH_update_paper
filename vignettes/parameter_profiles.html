@@ -7,9 +7,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
 <meta name="author" content="Leonardo Souto Ferreira">
-<meta name="dcterms.date" content="2026-02-11">
+<meta name="dcterms.date" content="2026-08-19">
 
-<title>Correlation and coherence</title>
+<title>Parameter profiles</title>
 <style>
 code{white-space: pre-wrap;}
 span.smallcaps{font-variant: small-caps;}
@@ -44,14 +44,26 @@ ul.task-list li input[type="checkbox"] {
 <body class="quarto-light">
 
 <div id="quarto-content" class="page-columns page-rows-contents page-layout-article">
-<div id="quarto-margin-sidebar" class="sidebar margin-sidebar zindex-bottom">
-  
+<div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
+  <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">Table of contents</h2>
+   
+  <ul>
+  <li><a href="#parameter-transforms" id="toc-parameter-transforms" class="nav-link active" data-scroll-target="#parameter-transforms">Parameter transforms</a></li>
+  <li><a href="#plot-conventions" id="toc-plot-conventions" class="nav-link" data-scroll-target="#plot-conventions">Plot conventions</a></li>
+  <li><a href="#helper-functions" id="toc-helper-functions" class="nav-link" data-scroll-target="#helper-functions">Helper functions</a></li>
+  <li><a href="#ahmedabad-relative-humidity" id="toc-ahmedabad-relative-humidity" class="nav-link" data-scroll-target="#ahmedabad-relative-humidity">Ahmedabad, relative humidity</a></li>
+  <li><a href="#ahmedabad-maximum-temperature" id="toc-ahmedabad-maximum-temperature" class="nav-link" data-scroll-target="#ahmedabad-maximum-temperature">Ahmedabad, maximum temperature</a></li>
+  <li><a href="#surat-relative-humidity" id="toc-surat-relative-humidity" class="nav-link" data-scroll-target="#surat-relative-humidity">Surat, relative humidity</a></li>
+  <li><a href="#surat-maximum-temperature" id="toc-surat-maximum-temperature" class="nav-link" data-scroll-target="#surat-maximum-temperature">Surat, maximum temperature</a></li>
+  </ul>
+</nav>
 </div>
 <main class="content" id="quarto-document-content">
 
 <header id="title-block-header" class="quarto-title-block default">
 <div class="quarto-title">
-<h1 class="title">Correlation and coherence</h1>
+<h1 class="title">Parameter profiles</h1>
 </div>
 
 
@@ -68,7 +80,7 @@ ul.task-list li input[type="checkbox"] {
     <div>
     <div class="quarto-title-meta-heading">Published</div>
     <div class="quarto-title-meta-contents">
-      <p class="date">February 11, 2026</p>
+      <p class="date">August 19, 2026</p>
     </div>
   </div>
   
@@ -80,154 +92,66 @@ ul.task-list li input[type="checkbox"] {
 </header>
 
 
-<div class="cell">
-<div class="cell-output cell-output-stdout">
-<pre><code># A tibble: 25,000 × 11
-# Groups:   name [25]
-   name  value smoothed quadratic  ci_1  ci_2 delta   mle label       xpos  ypos
-   &lt;chr&gt; &lt;dbl&gt;    &lt;dbl&gt;     &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;chr&gt;      &lt;dbl&gt; &lt;dbl&gt;
- 1 alpha 0.242    -887.     -887. 0.284 0.696  1.93 0.502 MLE: 0.50… 0.687 -893.
- 2 alpha 0.243    -887.     -887. 0.284 0.696  1.93 0.502 MLE: 0.50… 0.687 -893.
- 3 alpha 0.243    -887.     -887. 0.284 0.696  1.93 0.502 MLE: 0.50… 0.687 -893.
- 4 alpha 0.244    -887.     -887. 0.284 0.696  1.93 0.502 MLE: 0.50… 0.687 -893.
- 5 alpha 0.245    -887.     -887. 0.284 0.696  1.93 0.502 MLE: 0.50… 0.687 -893.
- 6 alpha 0.246    -887.     -887. 0.284 0.696  1.93 0.502 MLE: 0.50… 0.687 -893.
- 7 alpha 0.247    -887.     -887. 0.284 0.696  1.93 0.502 MLE: 0.50… 0.687 -893.
- 8 alpha 0.248    -887.     -887. 0.284 0.696  1.93 0.502 MLE: 0.50… 0.687 -893.
- 9 alpha 0.249    -887.     -887. 0.284 0.696  1.93 0.502 MLE: 0.50… 0.687 -893.
-10 alpha 0.250    -886.     -887. 0.284 0.696  1.93 0.502 MLE: 0.50… 0.687 -893.
-# ℹ 24,990 more rows</code></pre>
-</div>
-<div class="cell-output cell-output-stdout">
-<pre><code># A tibble: 50 × 2
-   name      ci
-   &lt;chr&gt;  &lt;dbl&gt;
- 1 alpha  0.284
- 2 alpha  0.696
- 3 b1    -5.72 
- 4 b1    -2.26 
- 5 b2    -3.14 
- 6 b2    -0.336
- 7 b3    -6.04 
- 8 b3    -2.70 
- 9 b4    -1.53 
-10 b4     2.28 
-# ℹ 40 more rows</code></pre>
-</div>
-<div class="cell-output cell-output-stdout">
-<pre><code># A tibble: 25 × 2
-   name        mle
-   &lt;chr&gt;     &lt;dbl&gt;
- 1 E_0    0.000621
- 2 F_0    0.715   
- 3 I1_0   0.00492 
- 4 I2_0   0.0868  
- 5 K_0    0.0499  
- 6 S1_0   0.302   
- 7 S2_0   0.606   
- 8 alpha  0.502   
- 9 b1    -2.91    
-10 b2    -1.15    
-# ℹ 15 more rows</code></pre>
-</div>
-<div class="cell-output-display">
-<div>
-<figure class="figure">
-<p><img src="parameter_profiles_files/figure-html/unnamed-chunk-4-1.png" class="img-fluid figure-img" width="1920"></p>
-</figure>
-</div>
-</div>
-<div class="cell-output-display">
-<div>
-<figure class="figure">
-<p><img src="parameter_profiles_files/figure-html/unnamed-chunk-4-2.png" class="img-fluid figure-img" width="1920"></p>
-</figure>
-</div>
-</div>
-<div class="cell-output-display">
-<div>
-<figure class="figure">
-<p><img src="parameter_profiles_files/figure-html/unnamed-chunk-4-3.png" class="img-fluid figure-img" width="1920"></p>
-</figure>
-</div>
-</div>
-<div class="cell-output-display">
-<div>
-<figure class="figure">
-<p><img src="parameter_profiles_files/figure-html/unnamed-chunk-4-4.png" class="img-fluid figure-img" width="1920"></p>
-</figure>
-</div>
-</div>
-</div>
+<section id="parameter-transforms" class="level1">
+<h1>Parameter transforms</h1>
+<p>All four profile files were produced with the <code>inf_exponent</code> model, so the estimation-scale transform is the one defined in <code>dynamical_model/fitting/pomp_object_inf_exponent.R</code> (fed to pomp via <code>parameter_trans(log=, logit=, barycentric=)</code> in <code>prepare_pomp_model()</code>). MCAP’s loess/quadratic machinery assumes an approximately quadratic log-likelihood surface, which only holds on the scale the model was actually fit on — so profile CIs need to be computed after transforming to that scale, then mapped back to the natural scale for plotting.</p>
+</section>
+<section id="plot-conventions" class="level1">
+<h1>Plot conventions</h1>
+<p>Black points are Monte Carlo estimates of the profile log-likelihood from the retained parameter fits; the blue curve is the loess-smoothed profile used for MCAP inference. The vermillion solid vertical line marks the true (unrestricted) MLE – the single best raw log-likelihood evaluation across the whole retained dataset, i.e.&nbsp;the same fitted parameter vector for every panel – and the orange dashed vertical lines mark the 95% MCAP confidence limits. The bottom-center annotation in each panel gives <code>MLE [CI low, CI high] (Δ=delta)</code> to ~3 significant digits; a confidence limit that rounds to the parameter’s natural boundary (e.g.&nbsp;<code>[..., 1.00]</code> for a logit-scale parameter) indicates the profile is boundary-limited rather than showing a conventional interior optimum. <code>delta</code> is the log-likelihood drop <code>mcap_checked()</code> used to define the CI cutoff (the profile is “inside” the CI wherever the smoothed curve is within <code>delta</code> of its own maximum) – i.e.&nbsp;how much loglik had to be given up to bound the parameter; <code>delta</code> is <code>NA</code> when the quadratic fit isn’t concave, in which case the reported CI is just the explored parameter range, not a real MCAP interval (both bounds will also show as truncated). Unless noted otherwise, the y-axis shows log-likelihood <em>relative to</em> that same true MLE (not the loess-smoothed maximum, which is noisier and per-panel), with a shared range computed from the plotted data so panels stay comparable; a curve poking above 0 flags Monte Carlo noise in the profile (see recommendation #14 in the source recommendations) rather than a better fit than the MLE. x-axes remain free per panel since parameter domains differ (unconstrained coefficients, positive rates, probabilities, proportions). Parameters were fit, and MCAP confidence intervals computed, on their estimation scale (see “Parameter transforms” above); this figure shows them back-transformed to the natural/biological scale, with a transformed-scale diagnostic version available via <code>plot_profile_group_transformed()</code> to check the underlying fit quality.</p>
+</section>
+<section id="helper-functions" class="level1">
+<h1>Helper functions</h1>
+</section>
+<section id="ahmedabad-relative-humidity" class="level1">
+<h1>Ahmedabad, relative humidity</h1>
 <div class="cell">
 <div class="cell-output-display">
 <div>
 <figure class="figure">
-<p><img src="parameter_profiles_files/figure-html/unnamed-chunk-5-1.png" class="img-fluid figure-img" width="672"></p>
+<p><img src="parameter_profiles_files/figure-html/unnamed-chunk-5-1.png" class="img-fluid figure-img" width="1920"></p>
 </figure>
 </div>
 </div>
 <div class="cell-output-display">
 <div>
 <figure class="figure">
-<p><img src="parameter_profiles_files/figure-html/unnamed-chunk-5-2.png" class="img-fluid figure-img" width="672"></p>
+<p><img src="parameter_profiles_files/figure-html/unnamed-chunk-5-2.png" class="img-fluid figure-img" width="1920"></p>
 </figure>
 </div>
 </div>
 <div class="cell-output-display">
 <div>
 <figure class="figure">
-<p><img src="parameter_profiles_files/figure-html/unnamed-chunk-5-3.png" class="img-fluid figure-img" width="672"></p>
-</figure>
-</div>
-</div>
-</div>
-<div class="cell">
-<div class="cell-output-display">
-<div>
-<figure class="figure">
-<p><img src="parameter_profiles_files/figure-html/unnamed-chunk-6-1.png" class="img-fluid figure-img" width="672"></p>
+<p><img src="parameter_profiles_files/figure-html/unnamed-chunk-5-3.png" class="img-fluid figure-img" width="1920"></p>
 </figure>
 </div>
 </div>
 <div class="cell-output-display">
 <div>
 <figure class="figure">
-<p><img src="parameter_profiles_files/figure-html/unnamed-chunk-6-2.png" class="img-fluid figure-img" width="672"></p>
+<p><img src="parameter_profiles_files/figure-html/unnamed-chunk-5-4.png" class="img-fluid figure-img" width="1920"></p>
 </figure>
 </div>
 </div>
 <div class="cell-output-display">
 <div>
 <figure class="figure">
-<p><img src="parameter_profiles_files/figure-html/unnamed-chunk-6-3.png" class="img-fluid figure-img" width="672"></p>
+<p><img src="parameter_profiles_files/figure-html/unnamed-chunk-5-5.png" class="img-fluid figure-img" width="1920"></p>
 </figure>
 </div>
 </div>
 </div>
-<div class="cell">
-<div class="cell-output-display">
-<div>
-<figure class="figure">
-<p><img src="parameter_profiles_files/figure-html/unnamed-chunk-7-1.png" class="img-fluid figure-img" width="672"></p>
-</figure>
-</div>
-</div>
-<div class="cell-output-display">
-<div>
-<figure class="figure">
-<p><img src="parameter_profiles_files/figure-html/unnamed-chunk-7-2.png" class="img-fluid figure-img" width="672"></p>
-</figure>
-</div>
-</div>
-<div class="cell-output-display">
-<div>
-<figure class="figure">
-<p><img src="parameter_profiles_files/figure-html/unnamed-chunk-7-3.png" class="img-fluid figure-img" width="672"></p>
-</figure>
-</div>
-</div>
-</div>
+</section>
+<section id="ahmedabad-maximum-temperature" class="level1">
+<h1>Ahmedabad, maximum temperature</h1>
+</section>
+<section id="surat-relative-humidity" class="level1">
+<h1>Surat, relative humidity</h1>
+</section>
+<section id="surat-maximum-temperature" class="level1">
+<h1>Surat, maximum temperature</h1>
+</section>
 
 </main>
 <!-- /main column -->

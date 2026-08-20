@@ -42,16 +42,8 @@ then mapped back to the natural scale for plotting.
 ```{r, eval = TRUE}
 model_env <- new.env()
 sys.source("dynamical_model/fitting/pomp_object_inf_exponent.R", envir = model_env)
-
-# S1_0/E_0/I1_0/S2_0/I2_0 are barycentric-transformed as a group:
-# T_i = log(theta_i / sum(theta)). But pomp's fromEst always reconstructs the
-# natural-scale values with sum(theta) == 1 (verified on every row of all 4
-# profile files), so T_i = log(theta_i) exactly here -- a plain log transform.
 log_scale_params <- c(model_env$log_transf, model_env$barycentric_transf)
 logit_scale_params <- model_env$logit_transf
-
-#' Vectorized over `name` (so it also works on a multi-parameter data frame,
-#' not just a single already-split-out parameter).
 param_scale <- function(name) {
   case_when(
     name %in% log_scale_params ~ "log",
@@ -59,13 +51,6 @@ param_scale <- function(name) {
     TRUE ~ "identity"
   )
 }
-
-#' Vectorized over `scale` too (a single scale string is recycled as usual).
-#' case_when() evaluates every branch's RHS across the whole vector before
-#' picking per-element which one applies, so e.g. qlogis() on a log-scale
-#' parameter's (out-of-[0,1]-range) value harmlessly warns "NaNs produced"
-#' even though that NaN is never selected; suppressWarnings() here is only
-#' silencing that non-issue, not hiding a real one.
 to_est <- function(value, scale) {
   suppressWarnings(case_when(
     scale == "log" ~ log(value),
@@ -85,40 +70,20 @@ from_est <- function(value, scale) {
 
 # Plot conventions
 
-Black points are Monte Carlo estimates of the profile log-likelihood from the
-retained parameter fits; the blue curve is the loess-smoothed profile used
-for MCAP inference. The vermillion solid vertical line marks the true
-(unrestricted) MLE -- the single best raw log-likelihood evaluation across
-the whole retained dataset, i.e. the same fitted parameter vector for every
-panel -- and the orange dashed vertical lines mark the 95% MCAP confidence
-limits. The bottom-center annotation in each panel gives
-`MLE [CI low, CI high] (Δ=delta)` to ~3 significant digits; a confidence
-limit that rounds to the parameter's natural boundary (e.g. `[..., 1.00]`
-for a logit-scale parameter) indicates the profile is boundary-limited
-rather than showing a conventional interior optimum. `delta` is the
-log-likelihood drop `mcap_checked()` used to define the CI cutoff (the
-profile is "inside" the CI wherever the smoothed curve is within `delta` of
-its own maximum) -- i.e. how much loglik had to be given up to bound the
-parameter; `delta` is `NA` when the quadratic fit isn't concave, in which
-case the reported CI is just the explored parameter range, not a real MCAP
-interval (both bounds will also show as truncated). Unless noted otherwise, the y-axis shows log-likelihood *relative
-to* that same true MLE (not the loess-smoothed maximum, which is noisier and
-per-panel), with a shared range computed from the plotted data so panels
-stay comparable; a curve poking above 0 flags Monte Carlo noise in the
-profile (see recommendation #14 in the source recommendations) rather than a
-better fit than the MLE. x-axes remain free per panel since parameter
-domains differ (unconstrained coefficients, positive rates, probabilities,
-proportions). Parameters were fit, and MCAP confidence intervals computed,
-on their estimation scale (see "Parameter transforms" above); this figure
-shows them back-transformed to the natural/biological scale, with a
-transformed-scale diagnostic version available via
-`plot_profile_group_transformed()` to check the underlying fit quality.
+Points are Monte Carlo log-likelihood evaluations; the blue curve is the
+MCAP-smoothed profile. The vermillion line/point mark the true MLE (the
+single best fit across the whole file, the same for every panel); the
+orange dashed lines mark the 95% MCAP confidence limits. Each panel's label
+reads `MLE [CI low, CI high] (Δ=delta)`: a `<`/`>` prefix on a bound means
+it's just the edge of the explored range, not a real MCAP crossing (fit
+wasn't concave, or too few points), and `delta` is the log-likelihood drop
+used to define the CI (`NA` when non-concave). The y-axis is log-likelihood
+relative to the true MLE, shared across panels; x-axes stay free per panel.
+Parameters are fit and profiled on their estimation scale (see "Parameter
+transforms" above) and shown here back-transformed;
+`plot_profile_group_transformed()` shows the estimation-scale version.
 
 ```{r, eval = TRUE}
-#' Format to ~`digits` significant figures: fixed notation in a normal range,
-#' scientific notation for very small/large magnitudes. Used instead of a
-#' fixed number of decimal places so labels stay compact whether the
-#' parameter is ~1e-8 or ~600.
 fmt_sig <- function(x, digits = 3) {
   vapply(x, function(xi) {
     if (is.na(xi)) {
@@ -131,19 +96,6 @@ fmt_sig <- function(x, digits = 3) {
     }
   }, character(1))
 }
-
-#' "mle [ci_1, ci_2] (delta=...)", ~3 significant figures -- the compact
-#' annotation used in every profile panel instead of repeating "MLE:"/"CI:"
-#' labels. A bound flagged `*_truncated` (mcap_checked(): non-concave fit,
-#' edge maximum, or too few local points -- see R/mcap.R) is not an actual
-#' MCAP threshold crossing, just the edge of the explored profile range, so
-#' it's shown as "<value"/">value" (true bound unknown beyond that point)
-#' rather than as if it were a properly estimated limit. `delta` is the
-#' log-likelihood drop mcap_checked() used to define the CI (the profile is
-#' "inside" the CI wherever smoothed loglik is within `delta` of its own
-#' max) -- how much of the loglik had to be given up to bound the parameter;
-#' NA (non-concave fit -- no valid delta) is shown as literal "NA" via
-#' fmt_sig()/paste0()'s normal NA-to-text handling, not a special case here.
 fmt_mle_ci <- function(mle, ci_1, ci_2, ci_1_truncated = FALSE, ci_2_truncated = FALSE,
                        delta = NA_real_, digits = 3) {
   lo <- paste0(ifelse(ci_1_truncated, "<", ""), fmt_sig(ci_1, digits))
@@ -199,58 +151,72 @@ theme_profile <- function(base_size) {
 # Helper functions
 
 ```{r, eval = TRUE}
-#' Reduce a parameter's (value, loglik) pairs to one row per DISTINCT focal
-#' value: the single best (max) log-likelihood evaluation at that value. This
-#' is what a profile-likelihood run actually is -- the focal parameter is
-#' fixed at a grid of values and every other parameter is re-optimized at
-#' each one -- so grouping by the focal parameter's own exact value and
-#' taking the best of however many replicate optimizations landed there
-#' recovers the profile directly; no binning needed, and no z-score/IQR
-#' trimming either (a value being unusual among the sampled cloud says
-#' nothing about whether its likelihood is relevant, and profile tails,
-#' where CI endpoints live, are exactly where trimming would cut).
-#'
-#' When the data carries a `profile_var` column (recording which parameter
-#' was actually held fixed for a given row -- currently only
-#' profile_Ahmedabad_hadISD_1997_2011_8_9.csv), rows are first restricted to
-#' `profile_var == name`: this parameter's own profile run, not the whole
-#' multi-parameter file. Without `profile_var`, the same
-#' group-by-exact-value logic runs on the whole dataset instead (rows from
-#' OTHER parameters' profile runs, where this one was itself free to vary,
-#' essentially never land on exactly the same value twice, so they just
-#' contribute as their own single-row group -- a reasonable but noisier
-#' approximation of the same thing).
-#'
-#' `diff_LL` is applied relative to THIS parameter's own best loglik within
-#' its (possibly profile_var-isolated) subset, not some unrelated global
-#' optimum, and widens automatically if too few distinct grid values survive
-#' it for a stable MCAP quadratic fit. `n_replicates` (kept as diagnostic
-#' metadata) is how many rows shared that exact value before picking the
-#' best one.
-focal_profile_points <- function(dataset, diff_LL = 10, min_points = 20) {
-  dataset <- dataset[complete.cases(dataset), ] |>
-    filter(loglik >= max(loglik) - diff_LL)
-
-  focal_name <- unique(dataset$name)
-  if ("profile_var" %in% names(dataset)) {
-    dataset <- dataset |> filter(profile_var == focal_name)
+#' Equal-width bins over x's own range (unlike quantile bins, which
+#' over-sample flat tails and under-sample a sharp peak).
+bin_uniform <- function(x, n_bins = 40) {
+  rng <- range(x, na.rm = TRUE)
+  width <- diff(rng)
+  if (!is.finite(width) || width == 0) {
+    return(list(bin = rep(1L, length(x)), bin_start = rep(rng[1], length(x)), bin_end = rep(rng[1], length(x))))
   }
-
-  if (nrow(dataset) == 0) {
-    return(dataset |> mutate(n_replicates = integer(0)))
-  }
-  reduced <- dataset |>
-    group_by(value) |>
-    mutate(n_replicates = n()) |>
-    slice_max(loglik, n = 1, with_ties = FALSE) |>
-    ungroup()
-
-  return(reduced)
+  breaks <- seq(rng[1], rng[2], length.out = n_bins + 1)
+  bin <- pmin(pmax(findInterval(x, breaks, rightmost.closed = TRUE), 1L), n_bins)
+  list(bin = bin, bin_start = breaks[bin], bin_end = breaks[bin + 1])
 }
 
-plot_mcap_binned_2 <- function(dataset, diff_LL = 10, min_points = 20) {
+#' One point per bin: transform to the estimation scale, keep points within
+#' `diff_LL` of the max loglik, bin uniformly on that scale, and keep each
+#' bin's best (max-loglik) point at its own actual value -- never the bin
+#' midpoint, no z-score/IQR trimming.
+#'
+#' `diff_LL` widens (doubling) when there aren't at least `min_points`
+#' points yet, up to `max_diff_LL`. The target is a plain point count, not
+#' bin occupancy: requiring most of `n_bins` to be populated (the old rule)
+#' scales the target with an arbitrary display-resolution knob, not with
+#' what a stable quadratic fit needs (~min_points is plenty regardless of
+#' n_bins). And `max_diff_LL` is a real ceiling, not an escape hatch at
+#' 1e6: widening exists to rescue a thin dataset a little, not to end up
+#' admitting points thousands of loglik units from the peak just to hit a
+#' target -- those points don't inform where the CI boundary is, they just
+#' destabilize mcap_checked()'s local quadratic fit (it can overshoot
+#' between sparse/noisy points, like Runge's phenomenon in polynomial
+#' interpolation -- see trim_smoothed_floor()). A parameter that still
+#' doesn't have enough points at max_diff_LL is more honestly reported as
+#' "not enough data" (see plot_mcap_binned_2()'s nrow < 4 check) than
+#' fit with a wildly wrong curve.
+focal_profile_points <- function(dataset, diff_LL = 10, min_points = 30, max_diff_LL = 50, n_bins = 40) {
+  dataset <- dataset[complete.cases(dataset), ]
   scale <- param_scale(unique(dataset$name))
-  dataset <- focal_profile_points(dataset, diff_LL = diff_LL, min_points = min_points)
+  dataset <- dataset |> mutate(est_value = to_est(value, scale))
+
+  repeat {
+    windowed <- if (is.null(diff_LL)) {
+      dataset
+    } else {
+      dataset |> filter(loglik >= max(loglik) - diff_LL)
+    }
+
+    bins <- bin_uniform(windowed$est_value, n_bins = n_bins)
+    reduced <- windowed |>
+      mutate(bin = bins$bin, bin_start = bins$bin_start, bin_end = bins$bin_end) |>
+      group_by(bin) |>
+      slice_max(loglik, n = 1, with_ties = FALSE) |>
+      ungroup()
+
+    enough <- nrow(reduced) >= min_points
+    if (is.null(diff_LL) || enough || diff_LL >= max_diff_LL) {
+      return(reduced)
+    }
+    diff_LL <- diff_LL * 2
+  }
+}
+
+#' Fit mcap_checked() on focal_profile_points()'s reduced points (passed in
+#' directly, so the curve is always fit on exactly what's plotted) and
+#' transform the curve/CI back to the natural scale. Returns an NA
+#' placeholder instead of erroring when there's too little data to fit.
+plot_mcap_binned_2 <- function(dataset, lambda = 0.4) {
+  scale <- param_scale(unique(dataset$name))
 
   if (nrow(dataset) < 4) {
     return(tibble(
@@ -260,9 +226,9 @@ plot_mcap_binned_2 <- function(dataset, diff_LL = 10, min_points = 20) {
     ))
   }
 
-  parameter <- to_est(dataset$value, scale)
+  parameter <- dataset$est_value
   lp <- dataset$loglik
-  mcap_res <- mcap_checked(lp, parameter, lambda = 0.75)
+  mcap_res <- mcap_checked(lp, parameter, lambda = lambda)
 
   with(mcap_res, {
     if (is.infinite(ci[1])) ci[1] <- min(parameter)
@@ -281,22 +247,34 @@ plot_mcap_binned_2 <- function(dataset, diff_LL = 10, min_points = 20) {
   })
 }
 
-#' Read one profile-likelihood CSV, keep the acceptable region (mirroring the
-#' "mode" bookkeeping column present in some refined profile files but not
-#' others), and compute the MCAP-smoothed curve, its CI, and the per-value
-#' best-likelihood points (focal_profile_points()) for every parameter.
-analyze_profile <- function(profile_file, city, covariate_label, output_prefix) {
+#' Read one profile CSV and compute the MCAP-smoothed curve, CI, and
+#' per-bin best-likelihood points for every parameter. diff_LL/min_points/
+#' max_diff_LL/n_bins (point-selection) and lambda (loess span) default to
+#' focal_profile_points()'s and plot_mcap_binned_2()'s own defaults, but are
+#' exposed here so a single fit can be tuned without editing those functions.
+analyze_profile <- function(profile_file, city, covariate_label, output_prefix,
+                             diff_LL = 10, min_points = 60, max_diff_LL = 50,
+                             n_bins = 30, lambda = 0.6) {
   all_res <- read_csv(profile_file, show_col_types = FALSE)
   all_res <- all_res |>
-    select(-any_of(c("flag", "loglik.se", "sample", "mode", "source_file"))) |>
+    select(-any_of(c("flag", "loglik.se", "sample", "mode", "source_file", "profile_var"))) |>
     filter(rho >= 0.01)
-  all_res <- all_res |> filter(alpha > 0, alpha <= 1)
 
-  smoothed_curves <- all_res |>
+  # Reduce once; the scatter and the curve fit both read from this so they
+  # can never drift apart (see plot_mcap_binned_2()).
+  binned <- all_res |>
     select(-delta) |>
-    pivot_longer(-any_of(c("loglik", "profile_var"))) |>
+    pivot_longer(-loglik) |>
     split(~name) |>
-    lapply(plot_mcap_binned_2, diff_LL = 20) |>
+    lapply(focal_profile_points,
+      diff_LL = diff_LL, min_points = min_points,
+      max_diff_LL = max_diff_LL, n_bins = n_bins
+    ) |>
+    bind_rows(.id = "name")
+
+  smoothed_curves <- binned |>
+    split(~name) |>
+    lapply(plot_mcap_binned_2, lambda = lambda) |>
     bind_rows(.id = "name") |>
     rename(value = parameter)
 
@@ -309,7 +287,7 @@ analyze_profile <- function(profile_file, city, covariate_label, output_prefix) 
 
   mle_vals <- all_res |>
     select(-delta) |>
-    pivot_longer(-any_of(c("loglik", "profile_var"))) |>
+    pivot_longer(-loglik) |>
     group_by(name) |>
     slice_max(loglik) |>
     ungroup() |>
@@ -330,21 +308,8 @@ analyze_profile <- function(profile_file, city, covariate_label, output_prefix) 
     select(city, covariate, name, label) |>
     write_csv(str_glue("figures/{output_prefix}_parameters_profile.csv"))
 
-  # Same reduction (and same possibly-widened likelihood window) as
-  # plot_mcap_binned_2() above, so the plotted points match what the MCAP
-  # curve was actually fit to; see focal_profile_points() and "Plot
-  # conventions" above.
-  binned <- all_res |>
-    select(-delta) |>
-    pivot_longer(-any_of(c("loglik", "profile_var"))) |>
-    split(~name) |>
-    lapply(focal_profile_points, diff_LL = 20) |>
-    bind_rows(.id = "name")
-
-  # Reference for relative log-likelihood: the true (unrestricted) MLE's own
-  # raw log-likelihood -- the same single best-fit row used for mle_vals
-  # above, not the (per-panel, noisier) loess-smoothed curve maximum.
-  mle_loglik <- max(all_res$loglik)
+  # True MLE's raw loglik, not the noisier per-panel smoothed max.
+  mle_loglik <- max(all_res$loglik, na.rm = TRUE)
 
   list(
     binned = binned, smoothed_curves = smoothed_curves, ci_vals = ci_vals,
@@ -352,9 +317,8 @@ analyze_profile <- function(profile_file, city, covariate_label, output_prefix) 
   )
 }
 
-#' Subtract the true MLE's log-likelihood (a single scalar, shared by every
-#' panel -- see analyze_profile()) from `loglik`/`smoothed`, for
-#' relative-log-likelihood plotting (see "Plot conventions").
+#' Subtract the true MLE's log-likelihood (shared by every panel) for
+#' relative-log-likelihood plotting.
 apply_relative_loglik <- function(binned, smoothed_curves, mle_loglik) {
   list(
     binned = binned |> mutate(loglik = loglik - mle_loglik),
@@ -362,25 +326,43 @@ apply_relative_loglik <- function(binned, smoothed_curves, mle_loglik) {
   )
 }
 
-#' Compute a shared y-limit from the actual (post-relative) data being
-#' plotted, rather than a guessed fixed window -- a real "global y-axis"
-#' that adapts to whatever names_subset/profile is passed in, with a little
-#' padding and always including 0 (the MLE's own level).
-relative_ylim <- function(binned, smoothed_curves, pad = 0.5) {
+#' Shared y-limit computed from the plotted data (always includes 0, the
+#' MLE's level). The lower bound is a low percentile, not the literal min,
+#' so a handful of extreme outlier points (e.g. unconverged "fit"-stage
+#' rows) don't blow out the axis for every panel -- those rows stay in the
+#' data, just off the bottom of the shared view.
+relative_ylim <- function(binned, smoothed_curves, pad = 0.5, lower_quantile = 0.1) {
   vals <- c(binned$loglik, smoothed_curves$smoothed, 0)
   vals <- vals[is.finite(vals)]
-  range(vals) + c(-pad, pad)
+  lo <- quantile(vals, lower_quantile, names = FALSE)
+  hi <- max(vals)
+  c(lo - pad, hi + pad)
 }
 
-#' Profile-likelihood plot: points (raw MC loglik evaluations) + MCAP-smoothed
-#' curve + solid MLE line + dashed CI lines + a compact "mle [ci_1, ci_2]"
-#' annotation in each panel's top-left corner. One facet per parameter;
-#' `names_subset = NULL` plots every parameter in one grid. `relative = TRUE`
-#' (default) plots log-likelihood relative to the true MLE (see
-#' analyze_profile()), with a shared y-axis across panels (`ylim = NULL`
-#' computes it from the plotted data via relative_ylim(); pass an explicit
-#' `c(low, high)` to fix it, e.g. for comparing multiple saved figures) so
-#' identifiability is comparable across parameters; x stays free per panel.
+#' Drop smoothed-curve points that stray much below the worst, or above the
+#' best, actual point in that panel. loess (mcap_checked() uses a degree-2
+#' local fit) can overshoot wildly between sparse or noisy points -- like
+#' polynomial-interpolation Runge overshoot -- especially once the widening
+#' in focal_profile_points() has pulled in points far from the peak just to
+#' hit its bin-count target. A smoothed curve can never legitimately beat
+#' the actual best observed point, so an overshoot above it is always an
+#' artifact, not a real result; one bad fit also shouldn't blow out the
+#' shared y-axis (relative_ylim()) for every other panel.
+trim_smoothed_floor <- function(binned, smoothed_curves, margin = 3) {
+  bounds <- binned |>
+    group_by(name) |>
+    summarize(
+      floor = min(loglik, na.rm = TRUE) - margin,
+      ceiling = max(loglik, na.rm = TRUE) + margin,
+      .groups = "drop"
+    )
+  smoothed_curves |>
+    left_join(bounds, by = "name") |>
+    filter(is.na(smoothed) | (is.na(floor) & is.na(ceiling)) |
+      (smoothed >= floor & smoothed <= ceiling)) |>
+    select(-floor, -ceiling)
+}
+
 plot_profile_group <- function(profile, names_subset = NULL, base_size = 22, label_size = 5,
                                relative = TRUE, ylim = NULL) {
   binned <- profile$binned
@@ -395,6 +377,8 @@ plot_profile_group <- function(profile, names_subset = NULL, base_size = 22, lab
     mle_vals <- mle_vals |> filter(name %in% names_subset)
   }
 
+  smoothed_curves <- trim_smoothed_floor(binned, smoothed_curves)
+
   y_lab <- "Log-likelihood"
   if (relative) {
     rel <- apply_relative_loglik(binned, smoothed_curves, profile$mle_loglik)
@@ -404,14 +388,10 @@ plot_profile_group <- function(profile, names_subset = NULL, base_size = 22, lab
     if (is.null(ylim)) ylim <- relative_ylim(binned, smoothed_curves)
   }
 
-  # The global MLE's own point (see analyze_profile()) usually isn't part of
-  # THIS parameter's own profile_var subset, so it's not among `binned`'s
-  # points -- draw it explicitly rather than relying on it to show up by
-  # coincidence, so the vline always has a visible point to go with it.
+  # Draw the MLE point explicitly: it isn't always among `binned`'s points
+  # (focal_profile_points() keeps only one point per bin).
   mle_vals <- mle_vals |> mutate(mle_y = if (relative) 0 else profile$mle_loglik)
 
-  # Bottom-center anchor per panel: mean of the smoothed curve's own x-range
-  # approximates each free-x panel's horizontal midpoint.
   labels <- smoothed_curves |>
     group_by(name) |>
     summarize(label = first(label), xpos = mean(range(value)), .groups = "drop")
@@ -443,15 +423,8 @@ plot_profile_group <- function(profile, names_subset = NULL, base_size = 22, lab
   p
 }
 
-#' Same diagnostic as plot_profile_group(), but on each parameter's
-#' *estimation* scale (log/logit/identity; see param_scale()) instead of its
-#' natural scale. MCAP's loess/quadratic fit assumes it's fitting an
-#' approximately quadratic surface on THIS scale, so a misbehaved
-#' estimation -- a bad loess fit, a boundary artifact, a non-monotonic wiggle
-#' -- is best diagnosed here; the natural-scale plot can look fine even when
-#' the underlying fit is not, since back-transforming can visually smooth
-#' over problems. The MLE/CI annotation stays in natural-scale units (same
-#' label as the natural-scale plot) so the two are easy to cross-reference.
+#' Same as plot_profile_group(), but x is each parameter's estimation
+#' scale -- useful for spotting a bad fit that back-transforming would mask.
 plot_profile_group_transformed <- function(profile, names_subset = NULL, base_size = 22, label_size = 5,
                                            relative = TRUE, ylim = NULL) {
   binned <- profile$binned
@@ -465,6 +438,8 @@ plot_profile_group_transformed <- function(profile, names_subset = NULL, base_si
     ci_vals <- ci_vals |> filter(name %in% names_subset)
     mle_vals <- mle_vals |> filter(name %in% names_subset)
   }
+
+  smoothed_curves <- trim_smoothed_floor(binned, smoothed_curves)
 
   y_lab <- "Log-likelihood"
   if (relative) {
@@ -489,8 +464,6 @@ plot_profile_group_transformed <- function(profile, names_subset = NULL, base_si
       mle_y = if (relative) 0 else profile$mle_loglik
     )
 
-  # Bottom-center anchor per panel: mean of the smoothed curve's own x-range
-  # approximates each free-x panel's horizontal midpoint.
   labels <- smoothed_curves |>
     group_by(name) |>
     summarize(label = first(label), xpos = mean(range(value)), .groups = "drop")
@@ -540,7 +513,7 @@ save_profile_plot <- function(profile, names_subset, filename, label_size = 5, b
 
 ```{r, fig.height = 20, fig.width = 20, eval = TRUE}
 ahmedabad_rh <- analyze_profile(
-  "aggregated_results/all_profiles.csv",
+  "aggregated_results/profile_Ahmedabad_hadISD_1997_2011_8_9.csv",
   city = "Ahmedabad", covariate_label = "Relative humidity", output_prefix = "Ahmedabad_RH"
 )
 
@@ -554,7 +527,7 @@ save_profile_plot(ahmedabad_rh, param_groups$immunity, "figures/profile_Ahmedaba
 
 # Ahmedabad, maximum temperature
 
-```{r, fig.height = 20, fig.width = 20, eval = FALSE}
+```{r, fig.height = 20, fig.width = 20, eval = TRUE}
 ahmedabad_temp <- analyze_profile(
   "aggregated_results/profile_Ahmedabad_Max_Temp_1997_2011_9_9.csv",
   city = "Ahmedabad", covariate_label = "Maximum temperature", output_prefix = "Ahmedabad_Max_Temp"
@@ -570,7 +543,7 @@ save_profile_plot(ahmedabad_temp, param_groups$immunity, "figures/profile_Ahmeda
 
 # Surat, relative humidity
 
-```{r, fig.height = 20, fig.width = 20, eval = FALSE}
+```{r, fig.height = 20, fig.width = 20, eval = TRUE}
 surat_rh <- analyze_profile(
   "aggregated_results/profile_Surat_hadISD_1997_2016_7_7.csv",
   city = "Surat", covariate_label = "Relative humidity", output_prefix = "Surat_RH"
@@ -586,16 +559,23 @@ save_profile_plot(surat_rh, param_groups$immunity, "figures/profile_Surat_RH_imm
 
 # Surat, maximum temperature
 
-```{r, fig.height = 20, fig.width = 20, eval = FALSE}
-surat_temp <- analyze_profile(
-  "aggregated_results/profile_Surat_Max_Temp_1997_2016_5_9.csv",
-  city = "Surat", covariate_label = "Maximum temperature", output_prefix = "Surat_Max_Temp"
-)
-print(plot_profile_group(surat_temp, base_size = 12, label_size = 5))
+```{r, fig.height = 20, fig.width = 20, eval = TRUE}
+  surat_temp <- analyze_profile(
+    "aggregated_results/profile_Surat_Max_Temp_1997_2016_5_9_filtered.csv",
+    city = "Surat", covariate_label = "Maximum temperature", output_prefix = "Surat_Max_Temp"
+  )
 
-print(plot_profile_group_transformed(surat_temp, base_size = 12, label_size = 5))
+    # read_csv( "aggregated_results/profile_Surat_Max_Temp_1997_2016_5_9_new.csv") |>
+    # filter(bH <= 0) |>
+    # write_csv("aggregated_results/profile_Surat_Max_Temp_1997_2016_5_9_filtered.csv")
 
-save_profile_plot(surat_temp, param_groups$transmission, "figures/profile_Surat_Max_Temp_transmission.pdf")
-save_profile_plot(surat_temp, param_groups$initial, "figures/profile_Surat_Max_Temp_initial.pdf")
-save_profile_plot(surat_temp, param_groups$immunity, "figures/profile_Surat_Max_Temp_immunity.pdf")
+  print(plot_profile_group(surat_temp, base_size = 12, label_size = 5))
+
+  print(plot_profile_group_transformed(surat_temp, base_size = 12, label_size = 5))
+
+  save_profile_plot(surat_temp, param_groups$transmission, "figures/profile_Surat_Max_Temp_transmission.pdf")
+  save_profile_plot(surat_temp, param_groups$initial, "figures/profile_Surat_Max_Temp_initial.pdf")
+  save_profile_plot(surat_temp, param_groups$immunity, "figures/profile_Surat_Max_Temp_immunity.pdf")
+
+
 ```

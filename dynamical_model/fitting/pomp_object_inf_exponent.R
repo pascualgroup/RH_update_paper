@@ -1,7 +1,6 @@
 library(pomp)
 
 
-
 simul_pf <- pomp::Csnippet(r"{
   // compute transmission rate
   double betaIN = exp(b1*season1+b2*season2+b3*season3+b4*season4+
@@ -80,7 +79,7 @@ initlz_pf <- pomp::Csnippet("
 
 par_names <- c("sigOBS", "sigPRO", "muS2S1", "muEI1", "muI1S2", "muI2S2", "betaOUT", "delta", "rho", "tau", "q0", "alpha", "b1", "b2", "b3", "b4", "b5", "b6", "bH")
 vp_names <- c("S1_0", "E_0", "I1_0", "I2_0", "S2_0", "K_0", "F_0")
-log_transf <- c("muS2S1", "muEI1", "muI1S2", "muI2S2", "betaOUT", "sigOBS", "sigPRO", "tau", "K_0", "F_0")
-logit_transf <- c("rho", "q0", "alpha")
+log_transf <- c("muS2S1", "muEI1", "muI1S2", "muI2S2", "betaOUT", "sigOBS", "sigPRO", "tau", "K_0", "F_0", "alpha")
+logit_transf <- c("rho", "q0")
 barycentric_transf <- c("S1_0", "E_0", "I1_0", "S2_0", "I2_0")
 state_names <- c("cases", "S1", "E", "I1", "S2", "I2", "K", "F", "W")

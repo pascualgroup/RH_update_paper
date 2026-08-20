@@ -382,8 +382,8 @@ predict_from_profile <- function(filtered_res, city, covariate, end_year, window
     mutate(city = city)
 }
 
-surat_result_temp <- read_csv("aggregated_results/profile_Surat_Max_Temp_1997_2016_5_9.csv") |>
-  filter(rho >= 0.01, bH < 0) |>
+surat_result_temp <- read_csv("aggregated_results/profile_Surat_Max_Temp_1997_2016_5_9_new.csv") |>
+  filter(rho >= 0.01, bH < 0 ) |>
   predict_from_profile("Surat", "Max_Temp",
     end_year = 2016, window_start = 5, window_end = 9,
     dataset_path = "data/Surat/dataset_Surat_2023.csv"

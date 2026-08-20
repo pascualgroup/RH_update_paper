@@ -7,7 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
 <meta name="author" content="Leonardo Souto Ferreira">
-<meta name="dcterms.date" content="2026-08-19">
+<meta name="dcterms.date" content="2026-08-20">
 
 <title>Parameter profiles</title>
 <style>
@@ -80,7 +80,7 @@ ul.task-list li input[type="checkbox"] {
     <div>
     <div class="quarto-title-meta-heading">Published</div>
     <div class="quarto-title-meta-contents">
-      <p class="date">August 19, 2026</p>
+      <p class="date">August 20, 2026</p>
     </div>
   </div>
   
@@ -98,7 +98,7 @@ ul.task-list li input[type="checkbox"] {
 </section>
 <section id="plot-conventions" class="level1">
 <h1>Plot conventions</h1>
-<p>Black points are Monte Carlo estimates of the profile log-likelihood from the retained parameter fits; the blue curve is the loess-smoothed profile used for MCAP inference. The vermillion solid vertical line marks the true (unrestricted) MLE – the single best raw log-likelihood evaluation across the whole retained dataset, i.e.&nbsp;the same fitted parameter vector for every panel – and the orange dashed vertical lines mark the 95% MCAP confidence limits. The bottom-center annotation in each panel gives <code>MLE [CI low, CI high] (Δ=delta)</code> to ~3 significant digits; a confidence limit that rounds to the parameter’s natural boundary (e.g.&nbsp;<code>[..., 1.00]</code> for a logit-scale parameter) indicates the profile is boundary-limited rather than showing a conventional interior optimum. <code>delta</code> is the log-likelihood drop <code>mcap_checked()</code> used to define the CI cutoff (the profile is “inside” the CI wherever the smoothed curve is within <code>delta</code> of its own maximum) – i.e.&nbsp;how much loglik had to be given up to bound the parameter; <code>delta</code> is <code>NA</code> when the quadratic fit isn’t concave, in which case the reported CI is just the explored parameter range, not a real MCAP interval (both bounds will also show as truncated). Unless noted otherwise, the y-axis shows log-likelihood <em>relative to</em> that same true MLE (not the loess-smoothed maximum, which is noisier and per-panel), with a shared range computed from the plotted data so panels stay comparable; a curve poking above 0 flags Monte Carlo noise in the profile (see recommendation #14 in the source recommendations) rather than a better fit than the MLE. x-axes remain free per panel since parameter domains differ (unconstrained coefficients, positive rates, probabilities, proportions). Parameters were fit, and MCAP confidence intervals computed, on their estimation scale (see “Parameter transforms” above); this figure shows them back-transformed to the natural/biological scale, with a transformed-scale diagnostic version available via <code>plot_profile_group_transformed()</code> to check the underlying fit quality.</p>
+<p>Points are Monte Carlo log-likelihood evaluations; the blue curve is the MCAP-smoothed profile. The vermillion line/point mark the true MLE (the single best fit across the whole file, the same for every panel); the orange dashed lines mark the 95% MCAP confidence limits. Each panel’s label reads <code>MLE [CI low, CI high] (Δ=delta)</code>: a <code>&lt;</code>/<code>&gt;</code> prefix on a bound means it’s just the edge of the explored range, not a real MCAP crossing (fit wasn’t concave, or too few points), and <code>delta</code> is the log-likelihood drop used to define the CI (<code>NA</code> when non-concave). The y-axis is log-likelihood relative to the true MLE, shared across panels; x-axes stay free per panel. Parameters are fit and profiled on their estimation scale (see “Parameter transforms” above) and shown here back-transformed; <code>plot_profile_group_transformed()</code> shows the estimation-scale version.</p>
 </section>
 <section id="helper-functions" class="level1">
 <h1>Helper functions</h1>
@@ -145,12 +145,123 @@ ul.task-list li input[type="checkbox"] {
 </section>
 <section id="ahmedabad-maximum-temperature" class="level1">
 <h1>Ahmedabad, maximum temperature</h1>
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="parameter_profiles_files/figure-html/unnamed-chunk-6-1.png" class="img-fluid figure-img" width="1920"></p>
+</figure>
+</div>
+</div>
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="parameter_profiles_files/figure-html/unnamed-chunk-6-2.png" class="img-fluid figure-img" width="1920"></p>
+</figure>
+</div>
+</div>
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="parameter_profiles_files/figure-html/unnamed-chunk-6-3.png" class="img-fluid figure-img" width="1920"></p>
+</figure>
+</div>
+</div>
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="parameter_profiles_files/figure-html/unnamed-chunk-6-4.png" class="img-fluid figure-img" width="1920"></p>
+</figure>
+</div>
+</div>
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="parameter_profiles_files/figure-html/unnamed-chunk-6-5.png" class="img-fluid figure-img" width="1920"></p>
+</figure>
+</div>
+</div>
+</div>
 </section>
 <section id="surat-relative-humidity" class="level1">
 <h1>Surat, relative humidity</h1>
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="parameter_profiles_files/figure-html/unnamed-chunk-7-1.png" class="img-fluid figure-img" width="1920"></p>
+</figure>
+</div>
+</div>
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="parameter_profiles_files/figure-html/unnamed-chunk-7-2.png" class="img-fluid figure-img" width="1920"></p>
+</figure>
+</div>
+</div>
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="parameter_profiles_files/figure-html/unnamed-chunk-7-3.png" class="img-fluid figure-img" width="1920"></p>
+</figure>
+</div>
+</div>
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="parameter_profiles_files/figure-html/unnamed-chunk-7-4.png" class="img-fluid figure-img" width="1920"></p>
+</figure>
+</div>
+</div>
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="parameter_profiles_files/figure-html/unnamed-chunk-7-5.png" class="img-fluid figure-img" width="1920"></p>
+</figure>
+</div>
+</div>
+</div>
 </section>
 <section id="surat-maximum-temperature" class="level1">
 <h1>Surat, maximum temperature</h1>
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="parameter_profiles_files/figure-html/unnamed-chunk-8-1.png" class="img-fluid figure-img" width="1920"></p>
+</figure>
+</div>
+</div>
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="parameter_profiles_files/figure-html/unnamed-chunk-8-2.png" class="img-fluid figure-img" width="1920"></p>
+</figure>
+</div>
+</div>
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="parameter_profiles_files/figure-html/unnamed-chunk-8-3.png" class="img-fluid figure-img" width="1920"></p>
+</figure>
+</div>
+</div>
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="parameter_profiles_files/figure-html/unnamed-chunk-8-4.png" class="img-fluid figure-img" width="1920"></p>
+</figure>
+</div>
+</div>
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="parameter_profiles_files/figure-html/unnamed-chunk-8-5.png" class="img-fluid figure-img" width="1920"></p>
+</figure>
+</div>
+</div>
+</div>
 </section>
 
 </main>

@@ -1,5 +1,5 @@
 ---
-title: "Report"
+title: "CRPS by refitting window"
 author: "Leonardo Souto Ferreira"
 date: today
 toc: true

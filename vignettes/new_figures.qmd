@@ -1,5 +1,5 @@
 ---
-title: "Correlation and coherence"
+title: "Manuscript figures"
 author: "Leonardo Souto Ferreira"
 date: today
 format: html

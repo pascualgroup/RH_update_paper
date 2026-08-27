@@ -1,5 +1,5 @@
 ---
-title: "Results testing"
+title: "Sliding-window refitting"
 author: "Leonardo Souto Ferreira"
 date: today
 format: html

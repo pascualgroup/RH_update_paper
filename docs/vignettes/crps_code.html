@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 <meta name="author" content="Leonardo Souto Ferreira">
 <meta name="dcterms.date" content="2026-08-27">
-<title>Report – rhmalaria</title>
+<title>CRPS by refitting window – rhmalaria</title>
 <style>
 code{white-space: pre-wrap;}
 span.smallcaps{font-variant: small-caps;}
@@ -91,7 +91,7 @@ ul.task-list li input[type="checkbox"] {
       <button type="button" class="quarto-btn-toggle btn" data-bs-toggle="collapse" role="button" data-bs-target=".quarto-sidebar-collapse-item" aria-controls="quarto-sidebar" aria-expanded="false" aria-label="Toggle sidebar navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
         <i class="bi bi-layout-text-sidebar-reverse"></i>
       </button>
-        <nav class="quarto-page-breadcrumbs" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="../vignettes/climate_correlations.html">Articles</a></li><li class="breadcrumb-item"><a href="../vignettes/crps_code.html">Report</a></li></ol></nav>
+        <nav class="quarto-page-breadcrumbs" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="../vignettes/climate_correlations.html">Articles</a></li><li class="breadcrumb-item"><a href="../vignettes/crps_code.html">CRPS by refitting window</a></li></ol></nav>
         <a class="flex-grow-1" role="navigation" data-bs-toggle="collapse" data-bs-target=".quarto-sidebar-collapse-item" aria-controls="quarto-sidebar" aria-expanded="false" aria-label="Toggle sidebar navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">      
         </a>
     </div>
@@ -121,7 +121,7 @@ ul.task-list li input[type="checkbox"] {
 <li class="sidebar-item">
   <div class="sidebar-item-container"> 
   <a href="../vignettes/climate_correlations.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text">Correlation plots</span></a>
+ <span class="menu-text">Case-climate window correlations</span></a>
   </div>
 </li>
           <li class="sidebar-item">
@@ -133,13 +133,13 @@ ul.task-list li input[type="checkbox"] {
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
   <a href="../vignettes/create_profile_grids.pdf" class="sidebar-item-text sidebar-link">
- <span class="menu-text">Results testing</span></a>
+ <span class="menu-text">Building profile-likelihood parameter grids</span></a>
   </div>
 </li>
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
   <a href="../vignettes/crps_code.html" class="sidebar-item-text sidebar-link active">
- <span class="menu-text">Report</span></a>
+ <span class="menu-text">CRPS by refitting window</span></a>
   </div>
 </li>
           <li class="sidebar-item">
@@ -151,7 +151,7 @@ ul.task-list li input[type="checkbox"] {
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
   <a href="../vignettes/new_figures.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text">Correlation and coherence</span></a>
+ <span class="menu-text">Manuscript figures</span></a>
   </div>
 </li>
           <li class="sidebar-item">
@@ -181,7 +181,7 @@ ul.task-list li input[type="checkbox"] {
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
   <a href="../vignettes/refitting_window.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text">Results testing</span></a>
+ <span class="menu-text">Sliding-window refitting</span></a>
   </div>
 </li>
           <li class="sidebar-item">
@@ -451,8 +451,8 @@ ul.task-list li input[type="checkbox"] {
         
     <div class="quarto-code-links"><h2>Code Links</h2><ul><li><a href="undefined"><i class="bi bi-link-45deg"></i></a></li></ul></div></div>
 <!-- main -->
-<main class="content" id="quarto-document-content"><header id="title-block-header" class="quarto-title-block default"><nav class="quarto-page-breadcrumbs quarto-title-breadcrumbs d-none d-lg-block" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="../vignettes/climate_correlations.html">Articles</a></li><li class="breadcrumb-item"><a href="../vignettes/crps_code.html">Report</a></li></ol></nav><div class="quarto-title">
-<h1 class="title">Report</h1>
+<main class="content" id="quarto-document-content"><header id="title-block-header" class="quarto-title-block default"><nav class="quarto-page-breadcrumbs quarto-title-breadcrumbs d-none d-lg-block" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="../vignettes/climate_correlations.html">Articles</a></li><li class="breadcrumb-item"><a href="../vignettes/crps_code.html">CRPS by refitting window</a></li></ol></nav><div class="quarto-title">
+<h1 class="title">CRPS by refitting window</h1>
 </div>
 
 
@@ -497,16 +497,16 @@ ul.task-list li input[type="checkbox"] {
 <pre><code># A tibble: 18,720 × 6
    sample  time   size window  fixed    diff
    &lt;chr&gt;  &lt;dbl&gt;  &lt;dbl&gt;  &lt;int&gt;  &lt;dbl&gt;   &lt;dbl&gt;
- 1 1      2012   15.3       2  17.2     1.85
- 2 1      2012.   4.92      2  20.9    16.0 
- 3 1      2012.   7.84      2  19.1    11.3 
- 4 1      2012.   2.22      2   8.05    5.83
- 5 1      2012.  13.7       2   6.05   -7.65
- 6 1      2012.  10.6       2   4.06   -6.55
- 7 1      2012.  12.3       2   9.24   -3.07
- 8 1      2013. 354.        2 241.   -113.  
- 9 1      2013. 431.        2 287.   -144.  
-10 1      2013. 256.        2 170.    -86.0 
+ 1 1      2012   14.0       2  16.2     2.21
+ 2 1      2012.   5.07      2  19.9    14.8 
+ 3 1      2012.   8.26      2  19.9    11.7 
+ 4 1      2012.   2.27      2   8.25    5.99
+ 5 1      2012.  13.7       2   6.20   -7.53
+ 6 1      2012.   9.80      2   4.27   -5.53
+ 7 1      2012.  11.1       2   9.24   -1.90
+ 8 1      2013. 345.        2 261.    -84.0 
+ 9 1      2013. 424.        2 321.   -102.  
+10 1      2013. 261.        2 191.    -70.0 
 # ℹ 18,710 more rows</code></pre>
 </div>
 <div class="cell-output-display">

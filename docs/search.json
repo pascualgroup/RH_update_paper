@@ -530,67 +530,67 @@
   {
     "objectID": "vignettes/climate_correlations.html",
     "href": "vignettes/climate_correlations.html",
-    "title": "Correlation plots",
+    "title": "Case-climate window correlations",
     "section": "",
     "text": "compute_correlations &lt;- function(df, covariate, year_max, city) {\n  cases_df &lt;- df |&gt;\n    filter(year &lt;= year_max, month &gt;= 8, month &lt;= 11) |&gt;\n    group_by(year) |&gt;\n    summarize(cases = sum(PF))\n\n  covariate_df &lt;- df |&gt; filter(year &lt;= year_max) |&gt;\n   select(year, month, all_of(covariate)) |&gt;\n   rename(cov = all_of(covariate))\n  result_df &lt;- c()\n  for(i in 1:9){\n    for(j in i:9){\n      cov_df &lt;- covariate_df |&gt;\n        filter(month &gt;= i, month &lt;= j) |&gt;\n        group_by(year) |&gt;\n        summarize(cov = mean(cov))\n\n      joined &lt;- inner_join(cases_df, cov_df, by = \"year\")\n      val &lt;- cor(joined$cases, joined$cov)\n      res &lt;- tibble_row(city = city, covariate = covariate, start_window = i,\n       end_window = j, correlation = val)\n\n      result_df &lt;- rbind(result_df, res)\n    }\n  }\n\n  return(result_df)\n}",
     "crumbs": [
       "Articles",
-      "Correlation plots"
+      "Case-climate window correlations"
     ]
   },
   {
     "objectID": "vignettes/climate_correlations.html#ahmedabad-correlations",
     "href": "vignettes/climate_correlations.html#ahmedabad-correlations",
-    "title": "Correlation plots",
+    "title": "Case-climate window correlations",
     "section": "Ahmedabad Correlations",
     "text": "Ahmedabad Correlations\n\ndf &lt;- read_csv(here(\"data/Ahmedabad/dataset_Ahmedabad_2023.csv\"))\n## filter to 1997-2011\n\nahm_rh &lt;- compute_correlations(df, \"hadISD\", 2011, \"Ahmedabad\")\nahm_max_temp &lt;- compute_correlations(df, \"Max_Temp\", 2011, \"Ahmedabad\")\nahm_mean_temp &lt;- compute_correlations(df, \"Mean_Temp\", 2011, \"Ahmedabad\")\nahm_min_temp &lt;- compute_correlations(df, \"Min_Temp\", 2011, \"Ahmedabad\")",
     "crumbs": [
       "Articles",
-      "Correlation plots"
+      "Case-climate window correlations"
     ]
   },
   {
     "objectID": "vignettes/climate_correlations.html#surat-correlations",
     "href": "vignettes/climate_correlations.html#surat-correlations",
-    "title": "Correlation plots",
+    "title": "Case-climate window correlations",
     "section": "Surat Correlations",
     "text": "Surat Correlations\n\ndf &lt;- read_csv(here(\"data/Surat/dataset_Surat_2023.csv\"))\n## filter to 1997-2016\n\nsurat_rh &lt;- compute_correlations(df, \"hadISD\", 2016, \"Surat\")\nsurat_max_temp &lt;- compute_correlations(df, \"Max_Temp\", 2016, \"Surat\")\nsurat_mean_temp &lt;- compute_correlations(df, \"Mean_Temp\", 2016, \"Surat\")\nsurat_min_temp &lt;- compute_correlations(df, \"Min_Temp\", 2016, \"Surat\")",
     "crumbs": [
       "Articles",
-      "Correlation plots"
+      "Case-climate window correlations"
     ]
   },
   {
     "objectID": "vignettes/climate_correlations.html#plot",
     "href": "vignettes/climate_correlations.html#plot",
-    "title": "Correlation plots",
+    "title": "Case-climate window correlations",
     "section": "Plot",
     "text": "Plot",
     "crumbs": [
       "Articles",
-      "Correlation plots"
+      "Case-climate window correlations"
     ]
   },
   {
     "objectID": "vignettes/crps_code.html",
     "href": "vignettes/crps_code.html",
-    "title": "Report",
+    "title": "CRPS by refitting window",
     "section": "",
-    "text": "sigOBS   sigPRO   muS2S1    muEI1   muI1S2   muI2S2      betaOUT\n1 0.1384905 0.139971 2.063856 23.74218 10.60705 1.985031 5.769785e-05\n         rho         tau       bH        q0        b1       b2        b3\n1 0.01199514 0.006194551 1.510865 0.9867108 -2.909269 -1.15238 -3.510415\n        b4         b5          b6 delta      S1_0          E_0        I1_0\n1 1.089299 -0.7563353 -0.02105364  0.02 0.3018204 0.0006207956 0.004922808\n       S2_0       I2_0        K_0       F_0    alpha sample    loglik loglik.se\n1 0.6058352 0.08680075 0.04985306 0.7153055 0.502269   1827 -881.2262 0.1857334\n  flag\n1    1\n\n\n\n\n# A tibble: 18,720 × 6\n   sample  time   size window  fixed    diff\n   &lt;chr&gt;  &lt;dbl&gt;  &lt;dbl&gt;  &lt;int&gt;  &lt;dbl&gt;   &lt;dbl&gt;\n 1 1      2012   15.3       2  17.2     1.85\n 2 1      2012.   4.92      2  20.9    16.0 \n 3 1      2012.   7.84      2  19.1    11.3 \n 4 1      2012.   2.22      2   8.05    5.83\n 5 1      2012.  13.7       2   6.05   -7.65\n 6 1      2012.  10.6       2   4.06   -6.55\n 7 1      2012.  12.3       2   9.24   -3.07\n 8 1      2013. 354.        2 241.   -113.  \n 9 1      2013. 431.        2 287.   -144.  \n10 1      2013. 256.        2 170.    -86.0 \n# ℹ 18,710 more rows",
+    "text": "sigOBS   sigPRO   muS2S1    muEI1   muI1S2   muI2S2      betaOUT\n1 0.1384905 0.139971 2.063856 23.74218 10.60705 1.985031 5.769785e-05\n         rho         tau       bH        q0        b1       b2        b3\n1 0.01199514 0.006194551 1.510865 0.9867108 -2.909269 -1.15238 -3.510415\n        b4         b5          b6 delta      S1_0          E_0        I1_0\n1 1.089299 -0.7563353 -0.02105364  0.02 0.3018204 0.0006207956 0.004922808\n       S2_0       I2_0        K_0       F_0    alpha sample    loglik loglik.se\n1 0.6058352 0.08680075 0.04985306 0.7153055 0.502269   1827 -881.2262 0.1857334\n  flag\n1    1\n\n\n\n\n# A tibble: 18,720 × 6\n   sample  time   size window  fixed    diff\n   &lt;chr&gt;  &lt;dbl&gt;  &lt;dbl&gt;  &lt;int&gt;  &lt;dbl&gt;   &lt;dbl&gt;\n 1 1      2012   14.0       2  16.2     2.21\n 2 1      2012.   5.07      2  19.9    14.8 \n 3 1      2012.   8.26      2  19.9    11.7 \n 4 1      2012.   2.27      2   8.25    5.99\n 5 1      2012.  13.7       2   6.20   -7.53\n 6 1      2012.   9.80      2   4.27   -5.53\n 7 1      2012.  11.1       2   9.24   -1.90\n 8 1      2013. 345.        2 261.    -84.0 \n 9 1      2013. 424.        2 321.   -102.  \n10 1      2013. 261.        2 191.    -70.0 \n# ℹ 18,710 more rows",
     "crumbs": [
       "Articles",
-      "Report"
+      "CRPS by refitting window"
     ]
   },
   {
     "objectID": "vignettes/refitting_window.html",
     "href": "vignettes/refitting_window.html",
-    "title": "Results testing",
+    "title": "Sliding-window refitting",
     "section": "",
     "text": "Note\n\n\n\nCode execution is disabled for this document (execute: enabled: false): the sliding-window re-fitting below repeatedly fits the pomp model and is memory-heavy enough to exhaust memory during a full documentation-site build. Render it on its own (quarto render vignettes/refitting_window.qmd --execute) when you actually need fresh output.",
     "crumbs": [
       "Articles",
-      "Results testing"
+      "Sliding-window refitting"
     ]
   },
   {
@@ -651,12 +651,12 @@
   {
     "objectID": "vignettes/new_figures.html",
     "href": "vignettes/new_figures.html",
-    "title": "Correlation and coherence",
+    "title": "Manuscript figures",
     "section": "",
     "text": "Figure 1: case time series, covariate correlations, and station map\n\n\n\n\n\n\n\n\nLoading basemap 'world_physical_map' from map service 'esri'...\n\n\n\n\n\n\n\n\nFigure: wavelet power spectra\n\n\n\n\n\n\n\n\nFigure: cross wavelet power\n\n\n\n\n\n\n\n\nFigure: wavelet coherence\n\n\n\n\n\n\n\n\nFigures 2 and 3: model predictions with best-fit parameters\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nSM Figure, prediction from 2019 onwards Ahmedabad\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nFigure: scaled covariate windows",
     "crumbs": [
       "Articles",
-      "Correlation and coherence"
+      "Manuscript figures"
     ]
   },
   {

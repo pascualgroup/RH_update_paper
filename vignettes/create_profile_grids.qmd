@@ -1,5 +1,5 @@
 ---
-title: "Results testing"
+title: "Building profile-likelihood parameter grids"
 author: "Leonardo Souto Ferreira"
 date: today
 format: pdf

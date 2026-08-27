@@ -6,16 +6,14 @@ toc: true
 warning: false
 echo: false
 format: html
-knitr:
-  opts_knit:
-    root.dir: "/home/leonardo/Doutorado/humidity_malaria_update/"
 ---
 
 ```{r, message = F}
-source("R/simulation_functions.R")
-source("R/mcap.R")
-source("R/cleaning_profile_results.R")
-
+proj_root <- rprojroot::find_root(rprojroot::has_file("DESCRIPTION"))
+setwd(proj_root)
+knitr::opts_knit$set(root.dir = proj_root)
+pkgload::load_all(proj_root)
+library(tidyverse)
 
 library(ggpubr)
 library(sf)
@@ -29,8 +27,10 @@ library(ggspatial)
 ```{r, eval = T}
 df <- read_csv("aggregated_results/yearly_prediction_Ahmedabad_hadISD.csv")
 
-library(fitdistrplus)
 library(scoringRules)
+#' CRPS of the simulated ensemble against the observation, using the
+#' empirical distribution of the simulations (method = "edf"), matching
+#' the approach used in quantitative_estimates_fits.qmd.
 fit_crps <- function(df) {
   observation <- df |>
     filter(type == "data") |>
@@ -39,12 +39,9 @@ fit_crps <- function(df) {
   prediction <- df |>
     filter(type != "data") |>
     pull(PF)
-  fit <- fitdist(prediction, "nbinom")
-  size <- coef(fit)[1]
-  mu <- coef(fit)[2]
 
-  crps_res <- crps_nbinom(observation, size = size, mu = mu)
-  return(crps_res |> unlist())
+  crps_res <- scoringRules::crps_sample(y = observation, dat = prediction, method = "edf")
+  tibble(size = crps_res)
 }
 
 fit_crps_sample <- function(df, covariate, window_start, window_end, prediction_window, city) {
@@ -276,122 +273,6 @@ p2 <- p2 |>
   )
 
 ggsave("figure4.pdf", units = "mm", width = 180, height = 120, dpi = 1000)
-
-
-# all_res |>
-#   # dplyr::filter(floor(time) != 2020) |>
-#   dplyr::filter(time < 2019) |>
-#   group_by(window, sample) |>
-#   summarize(crps = mean(diff)) |>
-#   group_by(window) |>
-#   summarize(sd = sd(crps), crps = mean(crps)) |>
-#   ungroup() |>
-#   ggplot(aes(x = window, y = crps, ymin = crps - sd, ymax = crps + sd)) +
-#   geom_point() +
-#   geom_errorbar() +
-#   theme_bw(16)
-
-# all_res |>
-#   dplyr::filter(floor(time) != 2020) |>
-#   # dplyr::filter(time < 2019) |>
-#   group_by(window, sample) |>
-#   summarize(crps = mean(diff)) |>
-#   group_by(window) |>
-#   summarize(sd = sd(crps), crps = mean(crps)) |>
-#   ungroup() |>
-#   ggplot(aes(x = window, y = crps, ymin = crps - sd, ymax = crps + sd)) +
-#   geom_point() +
-#   geom_errorbar() +
-#   theme_bw(16)
-
-
-# all_res |>
-#   # dplyr::filter(floor(time) != 2020) |>
-#   dplyr::filter(time < 2019) |>
-#   group_by(window, sample) |>
-#   summarize(crps = mean(diff)) |>
-#   # summarize(crps = mean(size)) |>
-#   ungroup() |>
-#   arrange(crps)
-
-# all_res |>
-#   # dplyr::filter(floor(time) != 2020) |>
-#   dplyr::filter(time < 2019) |>
-#   group_by(window, sample) |>
-#   # summarize(crps = mean(diff)) |>
-#   summarize(crps = mean(size)) |>
-#   ungroup() |>
-#   arrange(crps)
-
-# best_window <- all_res |>
-#   # dplyr::filter(floor(time) != 2020) |>
-#   dplyr::filter(time < 2019) |>
-#   group_by(window, sample) |>
-#   summarize(crps = mean(diff)) |>
-#   # group_by(window, sample) |>
-#   # summarize(crps = mean(size)) |>
-#   group_by(window) |>
-#   summarize(sd = sd(crps), crps = mean(crps)) |>
-#   ungroup() |>
-#   slice_min(crps, n = 1) |>
-#   unlist() |>
-#   as.numeric()
-
-# best_window <- best_window[1]
-
-# best_sample <- all_res |>
-#   # dplyr::filter(floor(time) != 2020) |>
-#   # group_by(window, sample) |>
-#   # summarize(crps = mean(size)) |>
-#   dplyr::filter(time < 2019) |>
-#   group_by(window, sample) |>
-#   summarize(crps = mean(diff)) |>
-#   ungroup() |>
-#   dplyr::filter(window == best_window) |>
-#   dplyr::select(sample, crps) |>
-#   slice_min(crps, n = 1) |>
-#   unlist() |>
-#   as.numeric()
-
-# best_sample <- best_sample[1]
-
-# print(c("hadISD", best_window, best_sample))
-
-
-# best_window <- all_res |>
-#   dplyr::filter(floor(time) != 2020) |>
-#   # dplyr::filter(time < 2019) |>
-#   group_by(window, sample) |>
-#   # summarize(crps = mean(diff)) |>
-#   # group_by(window, sample) |>
-#   summarize(crps = mean(size)) |>
-#   group_by(window) |>
-#   summarize(sd = sd(crps), crps = mean(crps)) |>
-#   ungroup() |>
-#   slice_min(crps, n = 1) |>
-#   unlist() |>
-#   as.numeric()
-
-# best_window <- best_window[1]
-
-# best_sample <- all_res |>
-#   dplyr::filter(floor(time) != 2020) |>
-#   group_by(window, sample) |>
-#   summarize(crps = mean(size)) |>
-#   # dplyr::filter(time < 2019) |>
-#   # group_by(window, sample) |>
-#   # summarize(crps = mean(diff)) |>
-#   ungroup() |>
-#   dplyr::filter(window == best_window) |>
-#   dplyr::select(sample, crps) |>
-#   slice_min(crps, n = 1) |>
-#   unlist() |>
-#   as.numeric()
-
-# best_sample <- best_sample[1]
-
-# print(c("hadISD", best_window, best_sample))
-
 
 ```
 

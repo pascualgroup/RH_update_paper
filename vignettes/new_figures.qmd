@@ -9,14 +9,15 @@ execute:
   warning: FALSE
   echo: FALSE
   eval: FALSE
-knitr:
-  opts_knit:
-    root.dir: "/home/leonardo/Doutorado/RH_update_paper/"
 geometry:
   - margin=2cm
 ---
 
 ```{r, message = F, eval = TRUE}
+proj_root <- rprojroot::find_root(rprojroot::has_file("DESCRIPTION"))
+setwd(proj_root)
+knitr::opts_knit$set(root.dir = proj_root)
+pkgload::load_all(proj_root)
 library(tidyverse)
 library(WaveletComp)
 library(Rssa)
@@ -238,9 +239,8 @@ ggsave(here::here("figures/figure1.pdf"), units = "mm", width = 180, height = 18
 
 # Figure: wavelet power spectra
 
-```{r, eval = FALSE}
+```{r, eval = TRUE}
 library(RColorBrewer)
-source("R/plot_wavelet.R")
 df_ahmedabad <- read_csv("data/Ahmedabad/dataset_Ahmedabad_2023.csv") |>
   mutate(date = make_date(year, month, 1))
 
@@ -295,9 +295,9 @@ print(p2)
 ggsave("figure_wavelet.pdf", height = 120, width = 180, dpi = 600, unit = "mm")
 ```
 
-# Figure: wavelet coherence
+# Figure: cross wavelet power
 
-```{r, eval = FALSE}
+```{r, eval = TRUE}
 df <- read_csv("data/Ahmedabad/dataset_Ahmedabad_interpolated.csv") |> filter(year(date) >= 1997)
 cases_df <- read_csv("data/Ahmedabad/dataset_Ahmedabad_2023.csv") |>
   mutate(date = make_date(year, month, 1)) |>
@@ -318,6 +318,7 @@ daily_df_ahmedabad <- df |>
     date = make_date(year, month, 1)
   ) |>
   left_join(cases_df) |>
+  # mutate(PF = stats::filter(PF, rep(1 / 12, 12))) |>
   remove_missing()
 
 df <- read_csv("data/Surat/dataset_Surat_hadISD_raw.csv") |>
@@ -342,6 +343,7 @@ daily_df_surat <- df |>
     date = make_date(year, month, 1)
   ) |>
   left_join(cases_df) |>
+  # mutate(PF = stats::filter(PF, rep(1 / 12, 12))) |>
   remove_missing()
 
 invisible(capture.output(wc <- analyze.coherency(daily_df_ahmedabad, my.pair = c("humidity", "PF"), dt = 1 / 12, lowerPeriod = 0.5, date.format = "%Y-%m-%d", loess.span = 0)))
@@ -353,19 +355,51 @@ invisible(capture.output(wc5 <- analyze.coherency(daily_df_surat, my.pair = c("t
 invisible(capture.output(wc6 <- analyze.coherency(daily_df_surat, my.pair = c("max_temp", "PF"), dt = 1 / 12, lowerPeriod = 0.5, date.format = "%Y-%m-%d", loess.span = 0)))
 
 p1 <- plot_wavelet_coherence(list(Ahmedabad = list(wc, wc3), Surat = list(wc4, wc6)), "wp") +
-  labs(x = "Time") + theme_minimal(base_size = 7, base_family = "sans") +
-  theme(text = element_text(family = "sans"))
+  theme_minimal(base_size = 7, base_family = "sans") +
+  theme(axis.line = element_line(color = "black")) +
+  theme(legend.key.width = unit(5.5, "lines")) +
+  theme(
+    legend.position = "bottom",
+    legend.box.spacing = margin(-1, 0, 0, 0),
+    text = element_text(family = "sans")
+  ) +
+  guides(fill = guide_colourbar(title.vjust = 1)) +
+  scale_x_continuous(
+    breaks = c(2000, (2000 + 2020) / 2, 2020),
+    expand = c(0, 0),
+    labels = ~ format(make_date(floor(.x), round(12 * (.x - floor(.x)) + 1), 1), "%Y")
+  ) + labs(x = "Time")
 print(p1)
+
+ggsave("figures/figure_cross_wavelet_power.pdf", height = 120, width = 180, dpi = 600, unit = "mm")
+```
+
+# Figure: wavelet coherence
+
+```{r, eval = TRUE}
+p3 <- plot_wavelet_coherence(list(Ahmedabad = list(wc, wc3), Surat = list(wc4, wc6)), "wc") +
+  theme_minimal(base_size = 7, base_family = "sans") +
+  theme(axis.line = element_line(color = "black")) +
+  theme(legend.key.width = unit(5.5, "lines")) +
+  theme(
+    legend.position = "bottom",
+    legend.box.spacing = margin(-1, 0, 0, 0),
+    text = element_text(family = "sans")
+  ) +
+  guides(fill = guide_colourbar(title.vjust = 1)) +
+  scale_x_continuous(
+    breaks = c(2000, (2000 + 2020) / 2, 2020),
+    expand = c(0, 0),
+    labels = ~ format(make_date(floor(.x), round(12 * (.x - floor(.x)) + 1), 1), "%Y")
+  ) + labs(x = "Time")
+print(p3)
 
 ggsave("figures/figure_coherence.pdf", height = 120, width = 180, dpi = 600, unit = "mm")
 ```
 
 # Figures 2 and 3: model predictions with best-fit parameters
 
-```{r, eval = TRUE}
-source("R/simulation_functions.R")
-source("R/mcap.R")
-
+```{r, eval = FALSE}
 predict_from_profile <- function(filtered_res, city, covariate, end_year, window_start, window_end,
                                  dataset_path, k = 1) {
   filtered_res |>
@@ -465,134 +499,82 @@ print(p_surat)
 ggsave(here::here("figures/figure3.pdf"), plot = p_surat, height = 70, width = 180, dpi = 1000, unit = "mm")
 ```
 
-## Alternate combined panel (disabled)
-
-Same predictions as above, laid out as a single faceted grid (city x covariate) for an
-alternate submission format. Currently disabled (`eval = FALSE`).
+# SM Figure, prediction from 2019 onwards Ahmedabad
 
 ```{r, eval = FALSE}
-build_yearly_prediction_dataset <- function(param_file, city, covariate, covariate_label,
-                                            sample_id, prediction_window,
-                                            window_start, window_end) {
-  dat_df <- str_glue("data/{city}/dataset_{city}_2023.csv")
 
-  result <- read_csv(param_file) |>
-    dplyr::filter(sample == sample_id) |>
-    dplyr::select(-sample) |>
-    simulate_yearly_prediction(
-      city = city,
+predict_from_profile_different_year <- function(filtered_res, city, covariate, end_year, actual_end_year, window_start, window_end,
+                                                dataset_path, k = 1) {
+  filtered_res |>
+    get_top_sample(k = k) |>
+    predict_model(city,
       n_sims = 1000,
       model = "inf_exponent", covariate = covariate,
       start_year = 1997, start_month = 1,
-      end_year = 2011, end_month = 12,
+      end_year = end_year, end_month = 12,
+      actual_end_year = actual_end_year,
       end_year_prediction = 2023, end_month_prediction = 12,
-      prediction_window = prediction_window,
       window_start = window_start, window_end = window_end,
-      dataset = dat_df, output_format = c("data.frame", "pomps"), ignore_covid = TRUE,
-      actual_end_year = 2011, actual_end_month = 12
-    )
-
-  training <- result$training$training |>
-    mutate(type = if_else(.id == "data", "data", "training"))
-  prediction <- result$prediction |>
-    bind_rows() |>
-    mutate(type = if_else(.id == "data", "data", "prediction"))
-
-  dataset <- rbind(training, prediction)
-  training <- dataset |> filter(type == "training")
-
-  complete_data <- result$complete_data |>
-    dplyr::select(time, PF) |>
-    mutate(type = "data")
-
-  panel <- dataset |>
-    dplyr::select(time, PF, type) |>
-    dplyr::filter(type != "data") |>
-    rbind(complete_data) |>
-    arrange(time, type) |>
-    mutate(
-      covid = if_else(floor(time) == 2020 & type == "data", "sim", "nao"),
-      city = city, covariate = covariate_label
-    )
-
-  list(dataset = panel, training = training)
+      dataset = dataset_path, output_format = "data.frame"
+    ) |>
+    mutate(city = city)
 }
 
-res_ahmedabad_rh <- build_yearly_prediction_dataset(
-  "prediction_files/parameters_yearly_prediction Ahmedabad hadISD 13.csv",
-  city = "Ahmedabad", covariate = "hadISD", covariate_label = "Relative Humidity",
-  sample_id = 83, prediction_window = 13, window_start = 8, window_end = 9
-)
-
-res_ahmedabad_temp <- build_yearly_prediction_dataset(
-  "prediction_files/parameters_yearly_prediction Ahmedabad Max_Temp 14.csv",
-  city = "Ahmedabad", covariate = "Max_Temp", covariate_label = "Maximum Temperature",
-  sample_id = 83, prediction_window = 14, window_start = 9, window_end = 9
-)
-
-res_surat_rh <- build_yearly_prediction_dataset(
-  "prediction_files/parameters_yearly_prediction Surat hadISD 7.csv",
-  city = "Surat", covariate = "hadISD", covariate_label = "Relative Humidity",
-  sample_id = 2, prediction_window = 7, window_start = 5, window_end = 7
-)
-
-res_surat_temp <- build_yearly_prediction_dataset(
-  "prediction_files/parameters_yearly_prediction Surat Max_Temp 8.csv",
-  city = "Surat", covariate = "Max_Temp", covariate_label = "Maximum Temperature",
-  sample_id = 92, prediction_window = 8, window_start = 5, window_end = 7
-)
-
-dataset_all <- bind_rows(
-  res_ahmedabad_rh$dataset, res_ahmedabad_temp$dataset,
-  res_surat_rh$dataset, res_surat_temp$dataset
-)
-# matches original behavior: the vline uses the last-processed block's training window
-training <- res_surat_temp$training
-
-colors <- c("#000000", "#7570b3", "#1b9e77")
-colors2 <- c("#FFFFFF", "#D5CCE6", "#8af1b9")
-
-p1 <- dataset_all |>
-  ggplot(aes(
-    x = time, y = PF, fill = type, color = type
-  )) +
-  facet_grid(covariate ~ city) +
-  ggdist::stat_lineribbon(
-    .width = CI, linewidth = 0.8, na.rm = TRUE,
-  ) +
-  theme_minimal(22) +
-  theme(axis.line = element_line(color = "black")) +
-  geom_vline(xintercept = max(training$time), linetype = "dashed") +
-  theme(legend.position = "bottom", axis.title.y = element_markdown()) +
-  labs(
-    x = "Time", y = "Observed *P. falciparum* cases", color = "",
-    fill = ""
-  ) +
-  theme(legend.position = "bottom") +
-  scale_color_manual(
-    values = colors, labels = c("Data", "Training", "Prediction"),
-    breaks = c("data", "training", "prediction")
-  ) +
-  scale_fill_manual(
-    values = colors2, drop = TRUE, labels = c("Data", "Training", "Prediction"),
-    breaks = c("data", "training", "prediction")
-  ) +
-  coord_cartesian(ylim = c(0, 2000)) +
-  theme(
-    legend.position = "bottom",
-    legend.box.spacing = margin(-1, 0, 0, 0),
-    panel.grid.minor = element_blank(),
-    text = element_text(family = "Times")
+surat_result_temp <- read_csv("aggregated_results/profile_Surat_Max_Temp_1997_2016_5_9_new.csv") |>
+  filter(rho >= 0.01, bH < 0) |>
+  predict_from_profile_different_year("Surat", "Max_Temp",
+    end_year = 2018,
+    actual_end_year = 2016,
+    window_start = 5, window_end = 9,
+    dataset_path = "data/Surat/dataset_Surat_2023.csv"
   )
 
-print(p1)
+surat_result_rh <- read_csv("aggregated_results/profile_Surat_hadISD_1997_2016_7_7.csv") |>
+  filter(rho >= 0.01) |>
+  predict_from_profile_different_year("Surat", "hadISD",
+    end_year = 2018,
+    actual_end_year = 2016,
+    window_start = 7, window_end = 7,
+    dataset_path = "data/Surat/dataset_Surat_2023.csv"
+  )
 
-ggsave("figure3.pdf", height = 7, width = 14, dpi = 1000)
+ahmedabad_result_rh <- read_csv("aggregated_results/profile_Ahmedabad_hadISD_1997_2011_8_9.csv") |>
+  filter(mode == "refined_second", rho >= 0.01) |>
+  select(-mode, -profile_var, -source_file) |>
+  predict_from_profile_different_year("Ahmedabad", "hadISD",
+    end_year = 2018,
+    actual_end_year = 2011,
+    window_start = 8, window_end = 9,
+    dataset_path = "data/Ahmedabad/dataset_Ahmedabad_2023.csv"
+  )
+
+ahmedabad_result_temp <- read_csv("aggregated_results/profile_Ahmedabad_Max_Temp_1997_2011_9_9.csv") |>
+  filter(rho >= 0.01) |>
+  predict_from_profile_different_year("Ahmedabad", "Max_Temp",
+    end_year = 2018,
+    actual_end_year = 2011,
+    window_start = 9, window_end = 9,
+    dataset_path = "data/Ahmedabad/dataset_Ahmedabad_2023.csv"
+  )
+
+dataset <- ahmedabad_result_rh |>
+  mutate(covariate = "Relative Humidity") |>
+  rbind(ahmedabad_result_temp |> mutate(covariate = "Maximum Temperature")) |>
+  rbind(surat_result_rh |> mutate(covariate = "Relative Humidity")) |>
+  rbind(surat_result_temp |> mutate(covariate = "Maximum Temperature"))
+
+p_ahmedabad <- plot_prediction_panel(dataset, "Ahmedabad", 1600)
+print(p_ahmedabad)
+ggsave(here::here("figures/Ahmedabad_prediction_2019.pdf"), plot = p_ahmedabad, height = 70, width = 180, dpi = 1000, unit = "mm")
+
+p_surat <- plot_prediction_panel(dataset, "Surat", 2000)
+print(p_surat)
+ggsave(here::here("figures/Surat_prediction_2019.pdf"), plot = p_surat, height = 70, width = 180, dpi = 1000, unit = "mm")
 ```
 
 # Figure: scaled covariate windows
 
-```{r, eval = TRUE}
+```{r, eval = FALSE}
 covariate_window <- function(city, covariate, window_start, window_end) {
   dat_df <- str_glue("data/{city}/dataset_{city}_2023.csv")
   read_csv(dat_df) |>
@@ -623,7 +605,7 @@ all_df <- bind_rows(
     )
   )
 
-colors <- c("#000000", "#7570b3", "#1b9e77")
+colors <- c("#000000", "#0072B2", "#D55E00")
 
 all_df |> ggplot(aes(x = year, y = mean_covariate, color = type, group = 1)) +
   facet_grid(cols = vars(covariate), rows = vars(city), scales = "free_y") +
@@ -632,8 +614,13 @@ all_df |> ggplot(aes(x = year, y = mean_covariate, color = type, group = 1)) +
     values = colors,
     breaks = c("a", "b", "c")
   ) +
-  theme_bw(16) +
-  theme(legend.position = "none") +
+  theme_minimal(base_size = 16, base_family = "sans") +
+  theme(
+    axis.line = element_line(color = "black"),
+    legend.position = "none",
+    panel.grid.minor = element_blank(),
+    text = element_text(family = "Helvetica")
+  ) +
   labs(x = "Year", y = "Scaled covariate")
 
 ggsave("figure_covariates.pdf", dpi = 600, width = 10, height = 7)

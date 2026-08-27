@@ -5,15 +5,27 @@
 ## SLURM jobs. Files are written to a temp file in the same directory and then
 ## renamed to the final name to make writes atomic on the same filesystem.
 
-# safe null-coalescing helper used by manifest merging logic
+#' Null-coalescing operator
+#'
+#' Returns `a` unless it is `NULL`, in which case `b` is returned. Used by the
+#' manifest-merging helpers below.
+#'
+#' @param a Value to prefer.
+#' @param b Fallback value used when `a` is `NULL`.
+#' @return `a`, or `b` if `a` is `NULL`.
+#' @noRd
 `%||%` <- function(a, b) if (!is.null(a)) a else b
 
-#' Safe write helpers for SLURM per-task outputs
+#' Build a unique per-task filename suffix from SLURM environment variables
 #'
-#' These helpers write CSV and JSON files atomically into a directory. They
-#' construct a unique suffix from SLURM environment variables (or fall back to
-#' a local test suffix) so tasks can write separate files without contention.
+#' Construct a unique suffix from SLURM environment variables (job id, array
+#' task id, process id, local id, hostname), falling back to the current PID
+#' and hostname outside of a SLURM job. Used by [safe_write_csv()] and
+#' [safe_write_json()] so concurrent array tasks don't collide when writing
+#' per-task output files.
 #'
+#' @return A character scalar suffix, e.g. `"12345_A3_P0_node07"`.
+#' @keywords internal
 get_slurm_suffix <- function() {
   jid <- Sys.getenv("SLURM_JOB_ID", unset = Sys.getenv("JOB_ID", "local"))
   a_id <- Sys.getenv("SLURM_ARRAY_TASK_ID", unset = "")
@@ -250,6 +262,27 @@ safe_write_manifest_next_to <- function(manifest_obj, result_path, dir = NULL) {
   NULL
 }
 
+#' Write a run manifest describing a result file
+#'
+#' Build (or update) a manifest object for a fitting/profiling result and
+#' write it next to `result_path` via [safe_write_manifest_next_to()]. If
+#' `manifest_info` is supplied (e.g. the info object returned alongside a fit)
+#' it is reused and annotated with the result file path, status, and
+#' `mode_label`; otherwise a minimal manifest is constructed from scratch.
+#'
+#' @param df The result data frame written to `result_path`; used only to
+#'   determine `status` (`"finished"` if it has rows, `"empty"` otherwise).
+#' @param result_path Path to the result CSV file the manifest describes.
+#' @param mode_label Character scalar identifying which fitting mode produced
+#'   the result (recorded under `parameters$mode`).
+#' @param manifest_info Optional list (e.g. from [create_manifest_info()]) to
+#'   reuse and annotate instead of building a manifest from scratch.
+#' @param dir Optional directory to write the manifest into; defaults to
+#'   `dirname(result_path)`.
+#'
+#' @return Invisibly returns the path to the written manifest file, or `NULL`
+#'   if `df` or `result_path` is `NULL`.
+#' @export
 write_manifest_for_result <- function(df, result_path, mode_label, manifest_info = NULL, dir = NULL) {
   if (is.null(df) || is.null(result_path)) {
     return(NULL)

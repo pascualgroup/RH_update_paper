@@ -1,0 +1,58 @@
+Package: rhmalaria
+Title: Relative Humidity and Malaria Transmission Modeling Tools
+Version: 0.0.0.9000
+Authors@R:
+    person("Leonardo", "Souto Ferreira", , "leonardo.souto.ferreira@gmail.com", role = c("aut", "cre"))
+Description: Simulation, model-fitting, and diagnostic utilities for a
+    mechanistic Plasmodium falciparum transmission model relating malaria
+    transmission to relative humidity and temperature in Ahmedabad and
+    Surat, India. Provides functions to preprocess climate and case data,
+    fit and simulate the compartmental transmission model via 'pomp',
+    profile parameters, and produce diagnostic and wavelet-coherence plots
+    used in the accompanying manuscript and its Quarto vignettes.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 8.0.0
+Imports:
+    dplyr,
+    doFuture,
+    foreach,
+    future,
+    ggdist,
+    ggplot2,
+    ggtext,
+    jsonlite,
+    lubridate,
+    metR,
+    pomp,
+    readr,
+    rlang,
+    scales,
+    scico,
+    tibble,
+    tidyr
+Suggests:
+    altdoc,
+    basemaps,
+    biwavelet,
+    circumstance,
+    devtools,
+    future.apply,
+    ggpubr,
+    ggrepel,
+    ggspatial,
+    here,
+    patchwork,
+    pkgload,
+    quarto,
+    RColorBrewer,
+    rprojroot,
+    Rssa,
+    rstatix,
+    scoringRules,
+    sf,
+    tidyverse,
+    WaveletComp
+Remotes:
+    kingaa/circumstance

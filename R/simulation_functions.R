@@ -1,12 +1,17 @@
-library(tidyverse)
-library(lubridate)
-library(pomp)
-library(doParallel)
-library(doRNG)
-library(ggtext)
-library(doFuture)
-library(circumstance)
-
+#' Conditionally issue a warning
+#'
+#' Centralized helper that emits a warning only when verbosity is enabled,
+#' either via the explicit `verbose` argument or, if that is `NULL`, via the
+#' `vectorial.verbose` package option.
+#'
+#' @param msg Character. Warning message to emit.
+#' @param verbose Logical or `NULL`. If `NULL`, falls back to
+#'   `getOption("vectorial.verbose", FALSE)`.
+#' @param call. Logical. Passed through to `warning()`'s `call.` argument.
+#'
+#' @return `NULL`, invisibly.
+#'
+#' @keywords internal
 # centralized helper that checks either explicit arg or an option
 warn_if <- function(msg, verbose = NULL, call. = FALSE) {
   # prefer explicit verbose; otherwise check package-level option
@@ -16,6 +21,29 @@ warn_if <- function(msg, verbose = NULL, call. = FALSE) {
 }
 
 
+#' Generate output/log filenames for a fitting run
+#'
+#' Builds standardized `output_result` (CSV) and `output_log` filenames used
+#' by `fit_model()`, encoding the run's city, model, scale, covariate and
+#' time window into the filename. When `profile_var` is supplied the names
+#' are prefixed to mark them as belonging to a profile-likelihood run.
+#'
+#' @param city Character. City name.
+#' @param model Character. Short model name.
+#' @param scale Character. Aggregation scale (e.g. `'monthly'`).
+#' @param covariate Character. Covariate column name.
+#' @param start_year Integer. First year included.
+#' @param start_month Integer. Starting month in `start_year`.
+#' @param end_year Integer. Last year included.
+#' @param end_month Integer. Final month included.
+#' @param mode Character. Fitting mode (e.g. `'fit'`, `'refined'`).
+#' @param profile_var Optional character. Name of the parameter being
+#'   profiled; when supplied, filenames are tagged as profile output.
+#'
+#' @return A list with elements `output_result` (CSV filename) and
+#'   `output_log` (log filename).
+#'
+#' @keywords internal
 # Helper to generate output/result filenames used by `fit_model`
 generate_output_names <- function(
   city, model,
@@ -50,29 +78,17 @@ generate_output_names <- function(
   list(output_result = output_result, output_log = output_log)
 }
 
-yhour <- function(date_hour) {
-  day_of_year <- yday(date_hour)
-  # Get the hour of the day
-  hour_of_day <- hour(date_hour)
-  hour_of_year <- (day_of_year - 1) * 24 + hour_of_day
-  return(hour_of_year)
-}
-
-days_in_year <- function(year) {
-  result <- if_else(leap_year(year), 366, 365)
-  return(result)
-}
-
-hours_in_year <- function(year) {
-  result <- days_in_year(year) * 24
-  return(result)
-}
-
-mins_in_year <- function(year) {
-  result <- hours_in_year(year) * 60
-  return(result)
-}
-
+#' Find the first datetime-like column in a data frame
+#'
+#' Scans the columns of `df` in order and returns the name of the first one
+#' whose class is `Date`, `POSIXct`, or `POSIXt`.
+#'
+#' @param df A data frame.
+#'
+#' @return Character name of the first datetime-like column found, or `NULL`
+#'   if none matches.
+#'
+#' @keywords internal
 find_datetime_column <- function(df) {
   accepted <- c("Date", "POSIXct", "POSIXt")
   for (nm in names(df)) {
@@ -84,6 +100,20 @@ find_datetime_column <- function(df) {
   return(NULL)
 }
 
+#' Filter a data frame to an inclusive year/month period
+#'
+#' Keeps rows whose `year`/`month` columns fall within
+#' `[start_year-start_month, end_year-end_month]`, inclusive at both ends.
+#'
+#' @param df A data frame with `year` and `month` columns.
+#' @param start_year Integer. First year to include.
+#' @param start_month Integer. Starting month in `start_year`.
+#' @param end_year Integer. Last year to include.
+#' @param end_month Integer. Final month to include in `end_year`.
+#'
+#' @return The filtered data frame.
+#'
+#' @keywords internal
 filter_by_period <- function(df, start_year, start_month, end_year, end_month) {
   df |>
     filter(year >= start_year, year <= end_year) |>
@@ -91,6 +121,19 @@ filter_by_period <- function(df, start_year, start_month, end_year, end_month) {
     filter(year != end_year | (year == end_year & month <= end_month))
 }
 
+#' Safely min-max normalize a numeric vector
+#'
+#' Rescales `x` to `[0, 1]` using min-max normalization, ignoring `NA`
+#' values. Returns a vector of `NA` (rather than dividing by zero or
+#' producing `Inf`/`NaN`) when `x` is constant, all-`NA`, or otherwise has an
+#' infinite/zero range.
+#'
+#' @param x Numeric (or coercible to numeric) vector to normalize.
+#'
+#' @return A numeric vector the same length as `x`, rescaled to `[0, 1]`, or
+#'   a vector of `NA_real_` if normalization is not possible.
+#'
+#' @keywords internal
 normalize_minmax_safe <- function(x) {
   x_num <- as.numeric(x)
   minx <- min(x_num, na.rm = TRUE)
@@ -102,6 +145,27 @@ normalize_minmax_safe <- function(x) {
   (x_num - minx) / (maxx - minx)
 }
 
+#' Smooth a population time series and its derivative
+#'
+#' Fits a smooth curve to a population size series and returns both the
+#' smoothed values and their first derivative with respect to time (used
+#' downstream as the `dpopdt` covariate). Falls back to returning the raw
+#' population with `dpopdt = NA` when there are too few points (fewer than 5
+#' observations, or fewer than 3 distinct non-missing values) to smooth
+#' reliably.
+#'
+#' @param time Numeric vector of time points.
+#' @param pop Numeric vector of population sizes, same length as `time`.
+#' @param method Character. Smoothing method to use. Only `"smooth.spline"`
+#'   is currently supported.
+#' @param params List of parameters for the smoothing method (currently
+#'   unused for `"smooth.spline"`, which is applied with its defaults after
+#'   an initial loess fit).
+#'
+#' @return A list with elements `pop` (smoothed population) and `dpopdt`
+#'   (its first derivative).
+#'
+#' @keywords internal
 safe_pop_smooth <- function(time, pop, method = "smooth.spline", params = list(spar = 0.5)) {
   n <- length(time)
   if (n < 5 || length(unique(pop[!is.na(pop)])) < 3) {
@@ -148,9 +212,10 @@ safe_pop_smooth <- function(time, pop, method = "smooth.spline", params = list(s
 #'   - Computes the population size and its derivative using the smoothed version.
 #'
 #' @examples
+#' \dontrun{
 #' # Preprocess the data using the "original" model
 #' preprocessed_data <- preprocess_data(dat, "original", "covariate", 2000, 2020, 1, 12, 6, 9)
-#'
+#' }
 preprocess_data <- function(
   dat, model, covariate, start_year, end_year,
   start_month, end_month, window_start, window_end, extra_cov = NULL
@@ -734,14 +799,14 @@ setMethod(
 
 #' Run MIF2 fitting and post-process results
 #'
-#' Low-level worker that executes `circumstance::mif2` on a prepared `pomp`
+#' Low-level worker that executes `pomp::mif2` on a prepared `pomp`
 #' object and post-processes per-sample `pfilter` + `coef` summaries. The
 #' function preserves and restores the user's `future` plan when switching
 #' between parallel and sequential execution.
 #'
 #' @param po A `pomp` object prepared by `prepare_pomp_model()`.
 #' @param n_cores Integer number of worker processes to use when `allow_parallel = TRUE`.
-#' @param parameters A list of starting parameter vectors (format expected by `circumstance::mif2`).
+#' @param parameters A list of starting parameter vectors (format expected by `pomp::mif2`).
 #' @param seed_num Integer RNG seed (passed externally for reproducibility).
 #' @param rdd A `pomp::rw_sd` object defining parameter random-walk sizes.
 #' @param allow_parallel Logical; if `TRUE` will set a parallel future plan (multicore).
@@ -753,8 +818,8 @@ setMethod(
 #'
 #' @return A data.frame with fitted parameter estimates, log-likelihood summaries and a `flag` column indicating successful evaluations (1) or failures (0).
 #'
-#' @details The function internally calls `circumstance::mif2` and then runs
-#' `circumstance::pfilter` for each MIF sample to estimate log-likelihoods. It
+#' @details The function internally calls `pomp::mif2` and then runs
+#' `pomp::pfilter` for each MIF sample to estimate log-likelihoods. It
 #' uses `tryCatch` around heavy operations so single-sample failures become NA
 #' rows instead of aborting the whole batch.
 #'
@@ -1037,8 +1102,8 @@ prepare_model <- function(parameters,
 #' @param validate_only Logical. If `TRUE` perform validations and return early with `list(status = 'ok')` instead of constructing the full `pomp` object and fitting.
 #' @param reg_rw Optional numeric. Random-walk SD to use for regular (non-ivp) parameters. If `NULL` defaults are chosen based on `mode`.
 #' @param ivp_rw Optional numeric. Random-walk SD to use for initial-condition parameters. If `NULL` defaults are chosen based on `mode`.
-#' @param mif_control Optional list of control arguments forwarded to `circumstance::mif2` (e.g. `list(Np=1000, Nmif=50)`). If `NULL` defaults are used.
-#' @param pfilter_control Optional list of control arguments forwarded to `circumstance::pfilter` (e.g. `list(Nrep=10, Np=10000)`). If `NULL` defaults are used.
+#' @param mif_control Optional list of control arguments forwarded to `pomp::mif2` (e.g. `list(Np=1000, Nmif=50)`). If `NULL` defaults are used.
+#' @param pfilter_control Optional list of control arguments forwarded to `pomp::pfilter` (e.g. `list(Nrep=10, Np=10000)`). If `NULL` defaults are used.
 #' @param manifest_append Logical. If `TRUE` and a manifest file already exists at the target path, the new run info will be appended into an array; if `FALSE` the manifest file will be (re)created/overwritten. Default: `FALSE`.
 #'
 #' @return A data.frame (or list) with fitted parameter estimates and log-likelihood information when `validate_only = FALSE`.
@@ -1181,6 +1246,36 @@ fit_model <- function(
   return(list(result = result, manifest = manifest_info))
 }
 
+#' Compute particle-filter log-likelihoods for a set of parameter vectors
+#'
+#' For each row of `parameters`, runs `pfilter_control$Nrep` repeated
+#' `pomp::pfilter()` evaluations of `po` (optionally in parallel across
+#' `future` workers) and summarizes the replicate log-likelihoods per
+#' parameter row via `pomp::logmeanexp()`. The caller's `future` plan is
+#' preserved and restored on exit.
+#'
+#' @param po A `pomp` object (e.g. from `prepare_pomp_model()`).
+#' @param parameters A data.frame/tibble with one row per parameter set to
+#'   evaluate (columns are parameter names).
+#' @param pfilter_control Optional list with `Nrep` (replicates per
+#'   parameter row) and `Np` (number of particles), passed to
+#'   `pomp::pfilter()`. Defaults to `list(Nrep = 10, Np = 10000)`.
+#' @param allow_parallel Logical; if `TRUE` sets a `multicore` future plan
+#'   with `n_cores` workers, otherwise runs sequentially.
+#' @param n_cores Integer. Number of workers to use when `allow_parallel = TRUE`.
+#' @param seed Logical or integer seed forwarded to `foreach`'s
+#'   `.options.future`.
+#' @param chunk.size Optional chunk size forwarded to `foreach`'s
+#'   `.options.future`.
+#' @param scheduling Numeric scheduling parameter forwarded to `foreach`'s
+#'   `.options.future`.
+#' @param verbose Logical. If `TRUE`, emit warnings on individual `pfilter`
+#'   failures.
+#'
+#' @return `parameters` with two additional columns, `loglik` (mean
+#'   log-likelihood across replicates) and `loglik.se` (its standard error).
+#'
+#' @keywords internal
 compute_logliks <- function(
   po, parameters, pfilter_control = NULL,
   allow_parallel = FALSE, n_cores = 1,
@@ -1405,6 +1500,21 @@ simulate_model <- function(
 }
 
 
+#' Extract the k-th best parameter set from a fitting results table
+#'
+#' Sorts a fitting results table (as returned by `fit_model()`) by
+#' descending log-likelihood and returns the `k`-th row's parameter values
+#' as a named numeric vector, dropping the bookkeeping columns (`sample`,
+#' `loglik`, `loglik.se`, `flag`).
+#'
+#' @param dataset A data.frame/tibble of fitting results, including a
+#'   `loglik` column and one column per model parameter.
+#' @param k Integer. Rank (1 = best log-likelihood) of the parameter set to
+#'   return.
+#'
+#' @return A named numeric vector of parameter values for the `k`-th best fit.
+#'
+#' @export
 get_top_sample <- function(dataset, k = 1) {
   dataset2 <- dataset |>
     arrange(desc(loglik)) |>
@@ -1418,6 +1528,23 @@ get_top_sample <- function(dataset, k = 1) {
 }
 
 
+#' Plot simulated trajectories against observed data
+#'
+#' Takes a `simulate_model()`-style output (long data frame with `.id`,
+#' `time`, and `PF` columns, where `.id == "data"` marks the observed
+#' series) and plots either a credible-interval ribbon or individual
+#' trajectory lines, distinguishing "Data" from "Simulation".
+#'
+#' @param dataset A data.frame produced by `simulate_model()` (or similarly
+#'   shaped), with `.id`, `time`, and `PF` columns.
+#' @param mode Character. `"ribbon"` plots a `CI`-width credible interval via
+#'   `ggdist::stat_lineribbon()`; `"traj"` plots individual simulated lines.
+#' @param CI Numeric. Width of the credible interval used in `"ribbon"` mode.
+#' @param font_size Numeric. Base font size for the plot theme.
+#'
+#' @return A `ggplot` object.
+#'
+#' @export
 plot_simulation <- function(dataset, mode = c("ribbon", "traj"), CI = 0.80, font_size = 12) {
   mode <- match.arg(mode)
 
@@ -1462,6 +1589,47 @@ plot_simulation <- function(dataset, mode = c("ribbon", "traj"), CI = 0.80, font
 }
 
 
+#' Preprocess data into separate training and prediction tables
+#'
+#' Variant of `preprocess_data()` used for out-of-sample forecasting. Builds
+#' the smoothed population/derivative and windowed covariate as in
+#' `preprocess_data()`, but normalizes the covariate using the min/max/mean/sd
+#' computed over the (possibly longer) `actual_end_year`/`actual_end_month`
+#' range rather than the `end_year`/`end_month` training range, so that
+#' training and prediction covariates share a consistent scale. The result is
+#' split into a training table (`start_year`-`start_month` to
+#' `end_year`-`end_month`) and a prediction table (the month after
+#' `end_year`-`end_month` through `end_year_prediction`-`end_month_prediction`).
+#'
+#' @param dat The input data frame containing the raw data to preprocess.
+#' @param model The model type to be used for preprocessing (controls how
+#'   the windowed covariate is computed downstream).
+#' @param covariate The name of the covariate variable in the data frame.
+#' @param start_year The start year of the training period.
+#' @param end_year The end year of the training period.
+#' @param start_month The start month (in `start_year`) of the training period.
+#' @param end_month The end month (in `end_year`) of the training period.
+#' @param end_year_prediction The end year of the prediction period.
+#' @param end_month_prediction The end month (in `end_year_prediction`) of
+#'   the prediction period.
+#' @param window_start The start month of the window used to aggregate the
+#'   covariate within each year.
+#' @param window_end The end month of the window used to aggregate the
+#'   covariate within each year.
+#' @param actual_end_year The end year used to compute the covariate's
+#'   normalization range (min/max/mean/sd); defaults to `end_year` when `NULL`.
+#' @param actual_end_month The end month used to compute the covariate's
+#'   normalization range; defaults to `end_month` when `NULL`.
+#' @param extra_cov Optional data frame describing additional covariates to
+#'   merge in, with columns `covariate`, `window_start`, and `window_end`
+#'   (one row per extra covariate); each is min-max normalized over the
+#'   `start_year`/`start_month`-`actual_end_year`/`actual_end_month` range.
+#'
+#' @return A list of two data frames: `dat_training` (training period) and
+#'   `dat_prediction` (the period immediately following training, through
+#'   `end_year_prediction`-`end_month_prediction`).
+#'
+#' @export
 preprocess_data_prediction <- function(
   dat, model, covariate,
   start_year, end_year,
@@ -1595,6 +1763,61 @@ preprocess_data_prediction <- function(
   return(list(dat_training, dat_prediction))
 }
 
+#' Simulate a training period and forecast forward, including hidden states
+#'
+#' Loads and preprocesses `dataset` via `preprocess_data_prediction()`, then:
+#' (1) simulates the training period with the supplied `parameters`; (2)
+#' particle-filters the trained model over the training window
+#' (`pomp::pfilter(..., save.states = TRUE)`) to obtain posterior estimates
+#' of the hidden compartment states (and the covariate-driving states `K`,
+#' `F`) at the end of training, normalizing the epidemiological compartments
+#' (`S1`, `E`, `I1`, `I2`, `S2`) to fractions; (3) builds a fresh `pomp`
+#' object over the prediction period only, seeds it with the particle-filter
+#' estimated initial states (one column per particle) via `pomp::parmat()`,
+#' sets its `t0` to the end of the training period, and simulates forward.
+#' Training and prediction simulations are row-bound and labeled, and the
+#' covariate/season columns (which `pomp::simulate()` can misalign across
+#' `.id` when `params` is a matrix) are re-derived from the known covariate
+#' series by joining on `time` rather than trusting the simulate() output.
+#'
+#' @param parameters Named numeric vector or single-row data.frame/tibble
+#'   with parameter values (used for both the training simulation and as the
+#'   fixed non-state parameters of the prediction model).
+#' @param city The name of the city (currently unused inside the function
+#'   body, kept for interface consistency with related functions).
+#' @param n_sims The number of simulations/particles to use (default is 1).
+#' @param model The model to use (default is "original").
+#' @param covariate The covariate to use (default is "RH2").
+#' @param start_year The starting year of the training period (default is 1997).
+#' @param start_month The starting month of the training period (default is 1).
+#' @param end_year The ending year of the training period (default is 2014).
+#' @param end_month The ending month of the training period (default is 12).
+#' @param end_year_prediction The ending year of the forecast period (default is 2019).
+#' @param end_month_prediction The ending month of the forecast period (default is 12).
+#' @param window_start The starting month of the window used to aggregate
+#'   the covariate within each year.
+#' @param window_end The ending month of the window used to aggregate the
+#'   covariate within each year.
+#' @param dataset The path to the dataset CSV file.
+#' @param output_format The format of the output (default is "data.frame").
+#'   Currently validated but not forwarded to the internal `simulate()`
+#'   calls, which always request `"data.frame"`.
+#' @param actual_end_year Optional. End year used for covariate
+#'   normalization range in `preprocess_data_prediction()`; defaults to
+#'   `end_year` when `NULL`.
+#' @param actual_end_month Optional. End month used for covariate
+#'   normalization range in `preprocess_data_prediction()`; defaults to
+#'   `end_month` when `NULL`.
+#' @param extra_cov Optional data frame of additional covariates, passed
+#'   through to `preprocess_data_prediction()`.
+#'
+#' @return A tibble combining the training and prediction simulations, with
+#'   columns including `time`, `.id`, `is_data` (`"data"`/`"simulation"`),
+#'   `type` (`"data"`/`"training"`/`"prediction"`), the observation and
+#'   covariate columns, and the hidden compartment states (e.g. `S1`, `E`,
+#'   `I1`, `I2`, `S2`, `K`, `F`).
+#'
+#' @export
 predict_model_states <- function(
   parameters, city, n_sims = 1,
   model = "original", covariate = "RH2",
@@ -1645,7 +1868,7 @@ predict_model_states <- function(
     include.data = TRUE
   )
 
-  pfout <- po |> pfilter(params = param, Np = n_sims, save.states = TRUE)
+  pfout <- po |> pomp::pfilter(params = param, Np = n_sims, save.states = TRUE)
 
   saved_hidden_states <- pfout |>
     pomp::saved_states() |>
@@ -1719,9 +1942,48 @@ predict_model_states <- function(
 }
 
 
-## Thin wrapper kept for backwards compatibility: same signature and output
-## as before (state variables, e.g. S1/E/I1/I2/S2/K/F, dropped). Use
-## predict_model_states() directly when access to the hidden states is needed.
+#' Simulate a training period and forecast forward
+#'
+#' Thin wrapper around `predict_model_states()` kept for backwards
+#' compatibility: runs the same training-simulation + particle-filter +
+#' forecast pipeline, but drops the hidden compartment-state columns (e.g.
+#' `S1`, `E`, `I1`, `I2`, `S2`, `K`, `F`) from the output, keeping only the
+#' observation-level columns. Use `predict_model_states()` directly when
+#' access to the hidden states is needed.
+#'
+#' @param parameters Named numeric vector or single-row data.frame/tibble
+#'   with parameter values.
+#' @param city The name of the city.
+#' @param n_sims The number of simulations/particles to use (default is 1).
+#' @param model The model to use (default is "original").
+#' @param covariate The covariate to use (default is "RH2").
+#' @param start_year The starting year of the training period (default is 1997).
+#' @param start_month The starting month of the training period (default is 1).
+#' @param end_year The ending year of the training period (default is 2014).
+#' @param end_month The ending month of the training period (default is 12).
+#' @param end_year_prediction The ending year of the forecast period (default is 2019).
+#' @param end_month_prediction The ending month of the forecast period (default is 12).
+#' @param window_start The starting month of the window used to aggregate
+#'   the covariate within each year.
+#' @param window_end The ending month of the window used to aggregate the
+#'   covariate within each year.
+#' @param dataset The path to the dataset CSV file.
+#' @param output_format The format of the output (default is "data.frame").
+#'   Currently validated but not forwarded to the underlying simulation
+#'   (which always uses `"data.frame"`).
+#' @param actual_end_year Optional. End year used for covariate
+#'   normalization range; defaults to `end_year` when `NULL`.
+#' @param actual_end_month Optional. End month used for covariate
+#'   normalization range; defaults to `end_month` when `NULL`.
+#' @param extra_cov Optional data frame of additional covariates, passed
+#'   through to `predict_model_states()`.
+#'
+#' @return A tibble with columns `time`, `.id`, `is_data`, `type`, `PF`, and
+#'   `pop` (hidden states omitted).
+#'
+#' @seealso `predict_model_states`
+#'
+#' @export
 predict_model <- function(
   parameters, city, n_sims = 1,
   model = "original", covariate = "RH2",
@@ -1748,6 +2010,29 @@ predict_model <- function(
 }
 
 
+#' Plot a training/prediction trajectory against observed data
+#'
+#' Takes output from `predict_model()`/`predict_model_states()` (a long data
+#' frame with `time`, `PF`, `pop`, and a `type` column of `"data"`,
+#' `"training"`, `"prediction"`) and plots either a credible-interval ribbon
+#' or individual trajectory lines, with a dashed vertical line marking the
+#' end of the training period. Colors distinguish data, training, and
+#' prediction series.
+#'
+#' @param dataset A data.frame produced by `predict_model()` or
+#'   `predict_model_states()`, with `time`, `PF`, `pop`, and `type` columns.
+#' @param mode Character. `"ribbon"` plots a `CI`-width credible interval via
+#'   `ggdist::stat_lineribbon()`; `"traj"` plots individual simulated lines.
+#' @param CI Numeric. Width of the credible interval used in `"ribbon"` mode.
+#' @param font_size Numeric. Base font size for the plot theme.
+#' @param by_pop Logical. If `TRUE` (ribbon mode only), plots cases per
+#'   `pop_division` people (`PF / (pop / pop_division)`) instead of raw counts.
+#' @param pop_division Numeric. Population denominator used when `by_pop = TRUE`
+#'   (e.g. `1000` for cases per 1,000 people).
+#'
+#' @return A `ggplot` object.
+#'
+#' @export
 plot_prediction <- function(
   dataset, mode = c("ribbon", "traj"), CI = 0.8, font_size = 12,
   by_pop = FALSE, pop_division = 1000
@@ -1829,8 +2114,29 @@ plot_prediction <- function(
 }
 
 
+#' Re-seed a parameter vector's initial states from a particle filter
+#'
+#' Runs `pomp::pfilter()` on `pomp_model` with `save.states = TRUE`,
+#' averages the final saved particle states across particles, normalizes the
+#' epidemiological compartments (`S1`, `E`, `I1`, `I2`, `S2`) to sum to one,
+#' and writes the result into the `*_0` initial-condition slots (`S1_0`,
+#' `E_0`, `I1_0`, `I2_0`, `S2_0`, `K_0`, `F_0`) of the fitted parameter
+#' vector. Used to carry hidden-state estimates forward between successive
+#' fitting windows in `prediction_by_window()` / `simulate_yearly_prediction()`.
+#'
+#' @param pomp_model A `pomp` object to particle-filter.
+#' @param param Named numeric parameter vector to pass to `pfilter()` and to
+#'   update with the re-estimated initial states.
+#' @param n_sims Integer. Number of particles (`Np`) used by the particle
+#'   filter.
+#'
+#' @return A named numeric parameter vector (the fitted coefficients from
+#'   `pfilter()`) with its `*_0` initial-condition entries replaced by the
+#'   particle-filter-estimated states.
+#'
+#' @keywords internal
 pfilter_initial_states <- function(pomp_model, param, n_sims) {
-  pfout <- pomp_model |> pfilter(params = param, Np = n_sims, save.states = TRUE)
+  pfout <- pomp_model |> pomp::pfilter(params = param, Np = n_sims, save.states = TRUE)
 
   param2 <- coef(pfout)
 
@@ -1848,6 +2154,23 @@ pfilter_initial_states <- function(pomp_model, param, n_sims) {
   return(param2)
 }
 
+#' Filter a data frame to an inclusive year/month range
+#'
+#' Keeps rows of `dataset` (which must have `year` and `month` columns)
+#' between a start and end point, inclusive. The range can be given either
+#' as `year`/`month` integers, or as `Date` objects for `y_s`/`y_e` (in
+#' which case `m_s`/`m_e` are derived automatically and any explicit month
+#' arguments are ignored).
+#'
+#' @param dataset A data frame with `year` and `month` columns.
+#' @param y_s Start year (integer), or a `Date` marking the start of the range.
+#' @param y_e End year (integer), or a `Date` marking the end of the range.
+#' @param m_s Start month (integer); ignored if `y_s` is a `Date`.
+#' @param m_e End month (integer); ignored if `y_e` is a `Date`.
+#'
+#' @return The filtered data frame.
+#'
+#' @export
 filter_by_year_month <- function(dataset, y_s, y_e, m_s = NULL, m_e = NULL) {
   if (is.Date(y_s)) {
     m_s <- month(y_s)
@@ -1862,6 +2185,43 @@ filter_by_year_month <- function(dataset, y_s, y_e, m_s = NULL, m_e = NULL) {
   return(dat)
 }
 
+#' Split a dataset into sliding training/refit/simulation windows
+#'
+#' Helper for `prediction_by_window()` / `simulate_yearly_prediction()` that
+#' partitions `dataset` into the pieces needed to walk forward one year at a
+#' time from the end of training through `end_year_prediction`:
+#' \itemize{
+#'   \item `training_df`: the full training period
+#'     (`start_year`-`start_month` to `end_year`-`end_month`).
+#'   \item `simulation_df`: one data frame per forecast year (each spanning
+#'     12 months), from the month after training through
+#'     `end_year_prediction`-`end_month_prediction`.
+#'   \item `pfilter_df`: one data frame per refit step, each spanning
+#'     `prediction_window` years ending the month before the corresponding
+#'     `simulation_df` entry begins (the very first entry instead starts at
+#'     `start_year`-`start_month`, growing/sliding the window as needed).
+#'   \item `partial_pfilter_df`: like `pfilter_df` but truncated to end
+#'     `prediction_window - 1` years earlier, i.e. a shorter partial window
+#'     ending one year ahead of the previous refit point.
+#' }
+#'
+#' @param dataset A data frame with `year` and `month` columns spanning at
+#'   least `start_year`-`start_month` through
+#'   `end_year_prediction`-`end_month_prediction`.
+#' @param start_year Integer. First year of the training period.
+#' @param start_month Integer. First month (in `start_year`) of the training period.
+#' @param end_year Integer. Last year of the training period.
+#' @param end_month Integer. Last month (in `end_year`) of the training period.
+#' @param end_year_prediction Integer. Last year of the forecast horizon.
+#' @param end_month_prediction Integer. Last month (in `end_year_prediction`)
+#'   of the forecast horizon.
+#' @param prediction_window Integer. Length, in years, of the sliding refit
+#'   window used to re-estimate parameters/states before each forecast year.
+#'
+#' @return A list with elements `training_df`, `pfilter_df`,
+#'   `partial_pfilter_df`, and `simulation_df` as described above.
+#'
+#' @keywords internal
 separate_pfilter_simulation_datasets <- function(
   dataset, start_year = 1997, start_month = 1,
   end_year = 2014, end_month = 12,
@@ -1904,6 +2264,73 @@ separate_pfilter_simulation_datasets <- function(
 }
 
 
+#' Forecast forward year by year, refitting on a sliding window
+#'
+#' Used for the window-length sensitivity analysis: starting from a training
+#' fit, walks forward one forecast year at a time through
+#' `end_year_prediction`, and before each forecast year re-estimates hidden
+#' states and (for the parameters in `parameters_to_fit`) refits parameters
+#' via `mif2` on a trailing window of `prediction_window` years of data.
+#' Concretely, for each step it: (1) particle-filters over the current
+#' `prediction_window`-year window to re-seed initial compartment states
+#' (`pfilter_initial_states()`); (2) runs `pomp::mif2()` over that
+#' same window, with a random-walk applied only to `parameters_to_fit`
+#' (other parameters are fixed via `generate_rw_sd(..., profile_var = ...)`);
+#' (3) re-estimates initial states again with the newly fit parameters; and
+#' (4) simulates the next 12-month forecast year with those parameters and
+#' states. If `ignore_covid = TRUE`, `PF` is masked to `NA` for the year 2020
+#' before windowing/fitting, so that period does not influence the fits.
+#'
+#' @param parameters Named numeric vector or single-row data.frame/tibble
+#'   with starting parameter values for the initial training simulation and
+#'   first refit window.
+#' @param city The name of the city (currently unused inside the function
+#'   body, kept for interface consistency with related functions).
+#' @param n_sims Number of particles/simulations used for the training
+#'   simulation, particle filters, `mif2` fitting, and forecast simulations.
+#' @param model The model to use (default is "original").
+#' @param covariate The covariate to use (default is "RH2").
+#' @param start_year The starting year of the training period (default is 1997).
+#' @param start_month The starting month of the training period (default is 1).
+#' @param end_year The ending year of the training period (default is 2014).
+#' @param end_month The ending month of the training period (default is 12).
+#' @param end_year_prediction The ending year of the forecast horizon (default is 2019).
+#' @param end_month_prediction The ending month of the forecast horizon (default is 12).
+#' @param prediction_window Integer. Length, in years, of the sliding
+#'   refitting window used before each forecast year (see
+#'   `separate_pfilter_simulation_datasets()`).
+#' @param window_start The starting month of the window used to aggregate
+#'   the covariate within each year.
+#' @param window_end The ending month of the window used to aggregate the
+#'   covariate within each year.
+#' @param parameters_to_fit Character vector of parameter names that are
+#'   allowed to move (given a random-walk standard deviation) during the
+#'   yearly `mif2` refits; all other parameters are held fixed at their
+#'   current value.
+#' @param dataset The path to the dataset CSV file.
+#' @param output_format The format of the output (default is "data.frame").
+#'   Currently validated but not forwarded to the internal `simulate()`
+#'   calls, which always request `"data.frame"`.
+#' @param ignore_covid Logical. If `TRUE` (default), `PF` observations for
+#'   the year 2020 are set to `NA` before fitting/simulating, excluding the
+#'   COVID-19 disruption period from influencing the model.
+#' @param actual_end_year Optional. End year used for covariate
+#'   normalization range in `preprocess_data_prediction()`; defaults to
+#'   `end_year` when `NULL`.
+#' @param actual_end_month Optional. End month used for covariate
+#'   normalization range in `preprocess_data_prediction()`; defaults to
+#'   `end_month` when `NULL`.
+#'
+#' @return A list with elements:
+#' - `training`: a list with the training-period simulation.
+#' - `prediction`: a list of simulated forecasts, one per forecast year.
+#' - `parameters_prediction`: a list of fitted parameter vectors, one per
+#'   forecast year, plus the original `training` starting parameters.
+#' - `ignore_covid`: the `ignore_covid` argument, echoed back.
+#' - `complete_data`: the full training + prediction data (with COVID masking
+#'   applied if requested).
+#'
+#' @export
 prediction_by_window <- function(
   parameters, city, n_sims = 1,
   model = "original", covariate = "RH2",
@@ -1986,7 +2413,7 @@ prediction_by_window <- function(
     # if (i < length(pf_simulation_dfs$pfilter_df)) {
     dataset <- pf_simulation_dfs$pfilter_df[[i]]
     po <- prepare_pomp_model(model, param2, dataset, dataset)
-    po_mif <- po |> mif2(
+    po_mif <- po |> pomp::mif2(
       Np = 1000, Nmif = 50,
       cooling.type = "geometric",
       cooling.fraction.50 = 0.5,
@@ -2045,6 +2472,66 @@ prediction_by_window <- function(
 }
 
 
+#' Re-simulate yearly forecasts from a precomputed sequence of parameters
+#'
+#' Companion to `prediction_by_window()`, used to regenerate the year-by-year
+#' forecast simulations from an already-fitted sequence of yearly parameter
+#' vectors (e.g. the `parameters_prediction` output of
+#' `prediction_by_window()`), without repeating the `mif2` refitting step.
+#' `parameters` is expected to have one row per forecast year (in the same
+#' order as the forecast years produced by
+#' `separate_pfilter_simulation_datasets()`); row `i` (for `i >= 2`) is used
+#' to simulate forecast year `i - 1`. As in `prediction_by_window()`, if
+#' `ignore_covid = TRUE` the year-2020 `PF` observations are masked to `NA`
+#' before windowing.
+#'
+#' @param parameters A data.frame/tibble with one row of parameter values per
+#'   forecast step (row 1 corresponds to the training parameters; rows
+#'   `2:nrow(parameters)` are used to simulate forecast years `1:(nrow-1)`).
+#' @param city The name of the city (currently unused inside the function
+#'   body, kept for interface consistency with related functions).
+#' @param n_sims Number of particles/simulations used for the training and
+#'   forecast simulations.
+#' @param model The model to use (default is "original").
+#' @param covariate The covariate to use (default is "RH2").
+#' @param start_year The starting year of the training period (default is 1997).
+#' @param start_month The starting month of the training period (default is 1).
+#' @param end_year The ending year of the training period (default is 2014).
+#' @param end_month The ending month of the training period (default is 12).
+#' @param end_year_prediction The ending year of the forecast horizon (default is 2019).
+#' @param end_month_prediction The ending month of the forecast horizon (default is 12).
+#' @param prediction_window Integer. Length, in years, of the sliding window
+#'   used to partition the data (see `separate_pfilter_simulation_datasets()`);
+#'   only the forecast-year partitioning is used here.
+#' @param window_start The starting month of the window used to aggregate
+#'   the covariate within each year.
+#' @param window_end The ending month of the window used to aggregate the
+#'   covariate within each year.
+#' @param dataset The path to the dataset CSV file.
+#' @param output_format The format of the output (default is "data.frame").
+#'   Currently validated but not forwarded to the internal `simulate()`
+#'   calls, which always request `"data.frame"`.
+#' @param ignore_covid Logical. If `TRUE` (default), `PF` observations for
+#'   the year 2020 are set to `NA` before simulating, excluding the
+#'   COVID-19 disruption period.
+#' @param actual_end_year Optional. End year used for covariate
+#'   normalization range in `preprocess_data_prediction()`; defaults to
+#'   `end_year` when `NULL`.
+#' @param actual_end_month Optional. End month used for covariate
+#'   normalization range in `preprocess_data_prediction()`; defaults to
+#'   `end_month` when `NULL`.
+#'
+#' @return A list with elements:
+#' - `training`: a list with the training-period simulation.
+#' - `prediction`: a list of simulated forecasts, one per forecast year.
+#' - `parameters_prediction`: a list echoing the original `parameters`
+#'   starting values plus the per-year parameter vectors used for each
+#'   forecast year.
+#' - `ignore_covid`: the `ignore_covid` argument, echoed back.
+#' - `complete_data`: the full training + prediction data (with COVID masking
+#'   applied if requested).
+#'
+#' @export
 simulate_yearly_prediction <- function(
   parameters, city, n_sims = 1,
   model = "original", covariate = "RH2",
@@ -2158,6 +2645,25 @@ simulate_yearly_prediction <- function(
 }
 
 
+#' Plot a year-by-year windowed forecast against observed data
+#'
+#' Plots the output of `prediction_by_window()` / `simulate_yearly_prediction()`:
+#' combines the training simulation with the list of per-year forecast
+#' simulations, joins in the observed data, and renders either a
+#' credible-interval ribbon or individual trajectory lines, with a dashed
+#' vertical line marking the end of the training period.
+#'
+#' @param result A list as returned by `prediction_by_window()` or
+#'   `simulate_yearly_prediction()`, with elements `training`, `prediction`,
+#'   `ignore_covid`, and `complete_data`.
+#' @param mode Character. `"ribbon"` plots a `CI`-width credible interval via
+#'   `ggdist::stat_lineribbon()`; `"traj"` plots individual simulated lines.
+#' @param CI Numeric. Width of the credible interval used in `"ribbon"` mode.
+#' @param font_size Numeric. Base font size for the plot theme.
+#'
+#' @return A `ggplot` object.
+#'
+#' @export
 plot_prediction_by_year <- function(result, mode = c("ribbon", "traj"), CI = 0.8, font_size = 12) {
   mode <- match.arg(mode)
 

@@ -9,23 +9,25 @@ execute:
   warning: FALSE
   echo: FALSE
   eval: TRUE
-knitr:
-  opts_knit:
-    root.dir: "/home/leonardo/Doutorado/RH_update_paper/"
 geometry:
   - margin=2cm
 ---
 
 ```{r, message = F, eval = TRUE}
+proj_root <- rprojroot::find_root(rprojroot::has_file("DESCRIPTION"))
+setwd(proj_root)
+knitr::opts_knit$set(root.dir = proj_root)
+pkgload::load_all(proj_root)
 library(tidyverse)
-source("R/mcap.R")
-source("R/cleaning_profile_results.R")
 
 param_groups <- list(
   transmission = c("b1", "b2", "b3", "b4", "b5", "b6", "bH", "betaOUT", "alpha"),
   initial = c("S1_0", "S2_0", "E_0", "I1_0", "I2_0", "F_0", "K_0"),
   immunity = c("muEI1", "muS2S1", "muI1S2", "muI2S2", "q0", "rho", "tau", "sigOBS", "sigPRO")
 )
+# Mechanistic grouping (transmission / initial conditions / immunity) used
+# to order both the CSV tables and the plot facets.
+param_order <- unlist(param_groups, use.names = FALSE)
 ```
 
 # Parameter transforms
@@ -83,6 +85,7 @@ Parameters are fit and profiled on their estimation scale (see "Parameter
 transforms" above) and shown here back-transformed;
 `plot_profile_group_transformed()` shows the estimation-scale version.
 
+
 ```{r, eval = TRUE}
 fmt_sig <- function(x, digits = 3) {
   vapply(x, function(xi) {
@@ -97,10 +100,15 @@ fmt_sig <- function(x, digits = 3) {
   }, character(1))
 }
 fmt_mle_ci <- function(mle, ci_1, ci_2, ci_1_truncated = FALSE, ci_2_truncated = FALSE,
-                       delta = NA_real_, digits = 3) {
+                       delta = NA_real_, digits = 3, delta_symbol = "Δ", include_delta = TRUE,
+                       delta_sep = " ") {
   lo <- paste0(ifelse(ci_1_truncated, "<", ""), fmt_sig(ci_1, digits))
   hi <- paste0(ifelse(ci_2_truncated, ">", ""), fmt_sig(ci_2, digits))
-  paste0(fmt_sig(mle, digits), " [", lo, ", ", hi, "] (Δ=", fmt_sig(delta, digits), ")")
+  label <- paste0(fmt_sig(mle, digits), " [", lo, ", ", hi, "]")
+  if (include_delta) {
+    label <- paste0(label, delta_sep, "(", delta_symbol, "=", fmt_sig(delta, digits), ")")
+  }
+  label
 }
 
 # Publication-quality facet labels (plotmath) for the natural-scale plot.
@@ -125,6 +133,31 @@ parameter_labels <- c(
   I2_0 = "I[2]^0",
   K_0 = "K^0",
   F_0 = "F^0"
+)
+
+# Same parameter labels, as LaTeX math (for the CSV output, which feeds
+# LaTeX tables rather than ggplot facets).
+parameter_labels_latex <- c(
+  alpha = "$\\alpha$",
+  b1 = "$b_1$", b2 = "$b_2$", b3 = "$b_3$", b4 = "$b_4$", b5 = "$b_5$", b6 = "$b_6$",
+  bH = "$b_H$",
+  betaOUT = "$\\beta_{out}$",
+  muEI1 = "$\\mu_{EI1}$",
+  muS2S1 = "$\\mu_{S2S1}$",
+  muI1S2 = "$\\mu_{I1S2}$",
+  muI2S2 = "$\\mu_{I2S2}$",
+  q0 = "$q_0$",
+  rho = "$\\rho$",
+  tau = "$\\tau$",
+  sigOBS = "$\\sigma_{obs}$",
+  sigPRO = "$\\sigma_{proc}$",
+  S1_0 = "$S_1^0$",
+  S2_0 = "$S_2^0$",
+  E_0 = "$E^0$",
+  I1_0 = "$I_1^0$",
+  I2_0 = "$I_2^0$",
+  K_0 = "$K^0$",
+  F_0 = "$F^0$"
 )
 
 # Okabe-Ito colorblind-safe palette, matching the manuscript figures in
@@ -164,26 +197,6 @@ bin_uniform <- function(x, n_bins = 40) {
   list(bin = bin, bin_start = breaks[bin], bin_end = breaks[bin + 1])
 }
 
-#' One point per bin: transform to the estimation scale, keep points within
-#' `diff_LL` of the max loglik, bin uniformly on that scale, and keep each
-#' bin's best (max-loglik) point at its own actual value -- never the bin
-#' midpoint, no z-score/IQR trimming.
-#'
-#' `diff_LL` widens (doubling) when there aren't at least `min_points`
-#' points yet, up to `max_diff_LL`. The target is a plain point count, not
-#' bin occupancy: requiring most of `n_bins` to be populated (the old rule)
-#' scales the target with an arbitrary display-resolution knob, not with
-#' what a stable quadratic fit needs (~min_points is plenty regardless of
-#' n_bins). And `max_diff_LL` is a real ceiling, not an escape hatch at
-#' 1e6: widening exists to rescue a thin dataset a little, not to end up
-#' admitting points thousands of loglik units from the peak just to hit a
-#' target -- those points don't inform where the CI boundary is, they just
-#' destabilize mcap_checked()'s local quadratic fit (it can overshoot
-#' between sparse/noisy points, like Runge's phenomenon in polynomial
-#' interpolation -- see trim_smoothed_floor()). A parameter that still
-#' doesn't have enough points at max_diff_LL is more honestly reported as
-#' "not enough data" (see plot_mcap_binned_2()'s nrow < 4 check) than
-#' fit with a wildly wrong curve.
 focal_profile_points <- function(dataset, diff_LL = 10, min_points = 30, max_diff_LL = 50, n_bins = 40) {
   dataset <- dataset[complete.cases(dataset), ]
   scale <- param_scale(unique(dataset$name))
@@ -247,14 +260,9 @@ plot_mcap_binned_2 <- function(dataset, lambda = 0.4) {
   })
 }
 
-#' Read one profile CSV and compute the MCAP-smoothed curve, CI, and
-#' per-bin best-likelihood points for every parameter. diff_LL/min_points/
-#' max_diff_LL/n_bins (point-selection) and lambda (loess span) default to
-#' focal_profile_points()'s and plot_mcap_binned_2()'s own defaults, but are
-#' exposed here so a single fit can be tuned without editing those functions.
-analyze_profile <- function(profile_file, city, covariate_label, output_prefix,
-                             diff_LL = 10, min_points = 60, max_diff_LL = 50,
-                             n_bins = 30, lambda = 0.6) {
+analyze_profile <- function(profile_file, output_prefix,
+                            diff_LL = 10, min_points = 60, max_diff_LL = 50,
+                            n_bins = 30, lambda = 0.6, digits = 3) {
   all_res <- read_csv(profile_file, show_col_types = FALSE)
   all_res <- all_res |>
     select(-any_of(c("flag", "loglik.se", "sample", "mode", "source_file", "profile_var"))) |>
@@ -296,16 +304,22 @@ analyze_profile <- function(profile_file, city, covariate_label, output_prefix,
 
   smoothed_curves <- smoothed_curves |>
     left_join(mle_vals, by = "name") |>
-    mutate(label = fmt_mle_ci(mle, ci_1, ci_2, ci_1_truncated, ci_2_truncated, delta))
+    # Split onto two lines here (unlike the CSV label): "MLE [CI low, CI
+    # high] (delta=...)" runs too wide for a facet panel otherwise.
+    mutate(label = fmt_mle_ci(mle, ci_1, ci_2, ci_1_truncated, ci_2_truncated, delta, delta_sep = "\n"))
 
   smoothed_curves |>
     select(name, mle, ci_1, ci_2, ci_1_truncated, ci_2_truncated, delta) |>
     distinct() |>
     mutate(
-      label = fmt_mle_ci(mle, ci_1, ci_2, ci_1_truncated, ci_2_truncated, delta),
-      city = city, covariate = covariate_label
+      label = fmt_mle_ci(mle, ci_1, ci_2, ci_1_truncated, ci_2_truncated, digits = digits, include_delta = FALSE),
+      parameter = parameter_labels_latex[name]
     ) |>
-    select(city, covariate, name, label) |>
+    arrange(factor(name, levels = param_order)) |>
+    # Full-precision numeric columns (mle, ci_low/high, delta) alongside the
+    # rounded `label` string, so the CSV can be reanalyzed and not just read.
+    rename(ci_low = ci_1, ci_high = ci_2, ci_low_truncated = ci_1_truncated, ci_high_truncated = ci_2_truncated) |>
+    select(name, parameter, mle, ci_low, ci_high, ci_low_truncated, ci_high_truncated, delta, label) |>
     write_csv(str_glue("figures/{output_prefix}_parameters_profile.csv"))
 
   # True MLE's raw loglik, not the noisier per-panel smoothed max.
@@ -326,11 +340,6 @@ apply_relative_loglik <- function(binned, smoothed_curves, mle_loglik) {
   )
 }
 
-#' Shared y-limit computed from the plotted data (always includes 0, the
-#' MLE's level). The lower bound is a low percentile, not the literal min,
-#' so a handful of extreme outlier points (e.g. unconverged "fit"-stage
-#' rows) don't blow out the axis for every panel -- those rows stay in the
-#' data, just off the bottom of the shared view.
 relative_ylim <- function(binned, smoothed_curves, pad = 0.5, lower_quantile = 0.1) {
   vals <- c(binned$loglik, smoothed_curves$smoothed, 0)
   vals <- vals[is.finite(vals)]
@@ -338,16 +347,6 @@ relative_ylim <- function(binned, smoothed_curves, pad = 0.5, lower_quantile = 0
   hi <- max(vals)
   c(lo - pad, hi + pad)
 }
-
-#' Drop smoothed-curve points that stray much below the worst, or above the
-#' best, actual point in that panel. loess (mcap_checked() uses a degree-2
-#' local fit) can overshoot wildly between sparse or noisy points -- like
-#' polynomial-interpolation Runge overshoot -- especially once the widening
-#' in focal_profile_points() has pulled in points far from the peak just to
-#' hit its bin-count target. A smoothed curve can never legitimately beat
-#' the actual best observed point, so an overshoot above it is always an
-#' artifact, not a real result; one bad fit also shouldn't blow out the
-#' shared y-axis (relative_ylim()) for every other panel.
 trim_smoothed_floor <- function(binned, smoothed_curves, margin = 3) {
   bounds <- binned |>
     group_by(name) |>
@@ -377,6 +376,15 @@ plot_profile_group <- function(profile, names_subset = NULL, base_size = 22, lab
     mle_vals <- mle_vals |> filter(name %in% names_subset)
   }
 
+  # Facet order matches the mechanistic grouping used for the CSV tables,
+  # not alphabetical. Every layer's data needs `name` as the same factor --
+  # ggplot2 combines panel variables across layers, and a factor mixed with
+  # plain character columns from other layers falls back to alphabetical.
+  binned <- binned |> mutate(name = factor(name, levels = param_order))
+  smoothed_curves <- smoothed_curves |> mutate(name = factor(name, levels = param_order))
+  ci_vals <- ci_vals |> mutate(name = factor(name, levels = param_order))
+  mle_vals <- mle_vals |> mutate(name = factor(name, levels = param_order))
+
   smoothed_curves <- trim_smoothed_floor(binned, smoothed_curves)
 
   y_lab <- "Log-likelihood"
@@ -400,7 +408,8 @@ plot_profile_group <- function(profile, names_subset = NULL, base_size = 22, lab
     left_join(smoothed_curves |> select(name, ci_1, ci_2, delta) |> distinct(), by = "name") |>
     ggplot(aes(x = value, y = loglik)) +
     facet_wrap(~name,
-      scales = if (relative) "free_x" else "free",
+      # scales = if (relative) "free_x" else "free",
+      scales = "free",
       labeller = labeller(name = as_labeller(parameter_labels, label_parsed))
     ) +
     geom_point(size = 0.6, alpha = 0.4) +
@@ -417,9 +426,9 @@ plot_profile_group <- function(profile, names_subset = NULL, base_size = 22, lab
     theme_profile(base_size) +
     labs(x = "Parameter value", y = y_lab)
 
-  if (relative) {
-    p <- p + coord_cartesian(ylim = ylim)
-  }
+  # if (relative) {
+  #   p <- p + coord_cartesian(ylim = ylim)
+  # }
   p
 }
 
@@ -438,6 +447,15 @@ plot_profile_group_transformed <- function(profile, names_subset = NULL, base_si
     ci_vals <- ci_vals |> filter(name %in% names_subset)
     mle_vals <- mle_vals |> filter(name %in% names_subset)
   }
+
+  # Facet order matches the mechanistic grouping used for the CSV tables,
+  # not alphabetical. Every layer's data needs `name` as the same factor --
+  # ggplot2 combines panel variables across layers, and a factor mixed with
+  # plain character columns from other layers falls back to alphabetical.
+  binned <- binned |> mutate(name = factor(name, levels = param_order))
+  smoothed_curves <- smoothed_curves |> mutate(name = factor(name, levels = param_order))
+  ci_vals <- ci_vals |> mutate(name = factor(name, levels = param_order))
+  mle_vals <- mle_vals |> mutate(name = factor(name, levels = param_order))
 
   smoothed_curves <- trim_smoothed_floor(binned, smoothed_curves)
 
@@ -476,7 +494,8 @@ plot_profile_group_transformed <- function(profile, names_subset = NULL, base_si
     left_join(smoothed_curves |> select(name, ci_1, ci_2, delta) |> distinct(), by = "name") |>
     ggplot(aes(x = value, y = loglik)) +
     facet_wrap(~name,
-      scales = if (relative) "free_x" else "free",
+      # scales = if (relative) "free_x" else "free",
+      scales = "free",
       labeller = labeller(name = facet_labels)
     ) +
     geom_point(size = 0.6, alpha = 0.4) +
@@ -504,7 +523,9 @@ save_profile_plot <- function(profile, names_subset, filename, label_size = 5, b
                               width = 14, height = 14, dpi = 600) {
   p <- plot_profile_group(profile, names_subset, base_size = base_size, label_size = label_size)
   print(p)
-  ggsave(filename, plot = p, width = width, height = height, dpi = dpi)
+  # cairo_pdf (not the default pdf() device) is needed so the Δ glyph in
+  # the panel labels embeds correctly instead of dropping out/showing a box.
+  ggsave(filename, plot = p, width = width, height = height, dpi = dpi, device = cairo_pdf)
   invisible(p)
 }
 ```
@@ -514,10 +535,14 @@ save_profile_plot <- function(profile, names_subset, filename, label_size = 5, b
 ```{r, fig.height = 20, fig.width = 20, eval = TRUE}
 ahmedabad_rh <- analyze_profile(
   "aggregated_results/profile_Ahmedabad_hadISD_1997_2011_8_9.csv",
-  city = "Ahmedabad", covariate_label = "Relative humidity", output_prefix = "Ahmedabad_RH"
+  output_prefix = "Ahmedabad_RH"
 )
 
-print(plot_profile_group(ahmedabad_rh, base_size = 12, label_size = 5))
+print(plot_profile_group(ahmedabad_rh, base_size = 16, label_size = 3.5))
+ggsave("figures/profile_Ahmedabad_RH.pdf",
+  width = 14, height = 14, dpi = 600,
+device = cairo_pdf)
+
 print(plot_profile_group_transformed(ahmedabad_rh, base_size = 12, label_size = 5))
 
 save_profile_plot(ahmedabad_rh, param_groups$transmission, "figures/profile_Ahmedabad_RH_transmission.pdf")
@@ -530,9 +555,13 @@ save_profile_plot(ahmedabad_rh, param_groups$immunity, "figures/profile_Ahmedaba
 ```{r, fig.height = 20, fig.width = 20, eval = TRUE}
 ahmedabad_temp <- analyze_profile(
   "aggregated_results/profile_Ahmedabad_Max_Temp_1997_2011_9_9.csv",
-  city = "Ahmedabad", covariate_label = "Maximum temperature", output_prefix = "Ahmedabad_Max_Temp"
+  output_prefix = "Ahmedabad_Max_Temp"
 )
-print(plot_profile_group(ahmedabad_temp, base_size = 12, label_size = 5))
+print(plot_profile_group(ahmedabad_temp, base_size = 16, label_size = 3.5))
+ggsave("figures/profile_Ahmedabad_Max_Temp.pdf",
+  width = 14, height = 14, dpi = 600,
+  device = cairo_pdf
+)
 
 print(plot_profile_group_transformed(ahmedabad_temp, base_size = 12, label_size = 5))
 
@@ -546,9 +575,13 @@ save_profile_plot(ahmedabad_temp, param_groups$immunity, "figures/profile_Ahmeda
 ```{r, fig.height = 20, fig.width = 20, eval = TRUE}
 surat_rh <- analyze_profile(
   "aggregated_results/profile_Surat_hadISD_1997_2016_7_7.csv",
-  city = "Surat", covariate_label = "Relative humidity", output_prefix = "Surat_RH"
+  output_prefix = "Surat_RH"
 )
-print(plot_profile_group(surat_rh, base_size = 12, label_size = 5))
+print(plot_profile_group(surat_rh, base_size = 16, label_size = 3.5))
+ggsave("figures/profile_Surat_RH.pdf",
+  width = 14, height = 14, dpi = 600,
+  device = cairo_pdf
+)
 
 print(plot_profile_group_transformed(surat_rh, base_size = 12, label_size = 5))
 
@@ -560,22 +593,20 @@ save_profile_plot(surat_rh, param_groups$immunity, "figures/profile_Surat_RH_imm
 # Surat, maximum temperature
 
 ```{r, fig.height = 20, fig.width = 20, eval = TRUE}
-  surat_temp <- analyze_profile(
-    "aggregated_results/profile_Surat_Max_Temp_1997_2016_5_9_filtered.csv",
-    city = "Surat", covariate_label = "Maximum temperature", output_prefix = "Surat_Max_Temp"
-  )
+surat_temp <- analyze_profile(
+  "aggregated_results/profile_Surat_Max_Temp_1997_2016_5_9.csv",
+  output_prefix = "Surat_Max_Temp"
+)
 
-    # read_csv( "aggregated_results/profile_Surat_Max_Temp_1997_2016_5_9_new.csv") |>
-    # filter(bH <= 0) |>
-    # write_csv("aggregated_results/profile_Surat_Max_Temp_1997_2016_5_9_filtered.csv")
+print(plot_profile_group(surat_temp, base_size = 16, label_size = 3.5))
+ggsave("figures/profile_Surat_Max_Temp.pdf",
+  width = 14, height = 14, dpi = 600,
+  device = cairo_pdf
+)
 
-  print(plot_profile_group(surat_temp, base_size = 12, label_size = 5))
+print(plot_profile_group_transformed(surat_temp, base_size = 12, label_size = 5))
 
-  print(plot_profile_group_transformed(surat_temp, base_size = 12, label_size = 5))
-
-  save_profile_plot(surat_temp, param_groups$transmission, "figures/profile_Surat_Max_Temp_transmission.pdf")
-  save_profile_plot(surat_temp, param_groups$initial, "figures/profile_Surat_Max_Temp_initial.pdf")
-  save_profile_plot(surat_temp, param_groups$immunity, "figures/profile_Surat_Max_Temp_immunity.pdf")
-
-
+save_profile_plot(surat_temp, param_groups$transmission, "figures/profile_Surat_Max_Temp_transmission.pdf")
+save_profile_plot(surat_temp, param_groups$initial, "figures/profile_Surat_Max_Temp_initial.pdf")
+save_profile_plot(surat_temp, param_groups$immunity, "figures/profile_Surat_Max_Temp_immunity.pdf")
 ```

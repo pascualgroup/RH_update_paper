@@ -1,0 +1,115 @@
+---
+title: "Correlation plots"
+author: "Leonardo Souto Ferreira"
+date: today
+format: html
+knitr:
+  opts_knit:
+    root.dir: "/home/leonardo/Doutorado/RH_update_paper/"
+geometry:
+  - margin=2cm
+warning: false
+message: false
+echo: false
+fig-width: 8
+fig-height: 4
+---
+
+
+
+```{r setup, include=FALSE, message=FALSE}
+knitr::opts_chunk$set(autodep = TRUE)
+library(tidyverse)
+library(here)
+```
+
+```{r helper, echo = TRUE}
+compute_correlations <- function(df, covariate, year_max, city) {
+  cases_df <- df |>
+    filter(year <= year_max, month >= 8, month <= 11) |>
+    group_by(year) |>
+    summarize(cases = sum(PF))
+
+  covariate_df <- df |> filter(year <= year_max) |>
+   select(year, month, all_of(covariate)) |>
+   rename(cov = all_of(covariate))
+  result_df <- c()
+  for(i in 1:9){
+    for(j in i:9){
+      cov_df <- covariate_df |>
+        filter(month >= i, month <= j) |>
+        group_by(year) |>
+        summarize(cov = mean(cov))
+
+      joined <- inner_join(cases_df, cov_df, by = "year")
+      val <- cor(joined$cases, joined$cov)
+      res <- tibble_row(city = city, covariate = covariate, start_window = i,
+       end_window = j, correlation = val)
+
+      result_df <- rbind(result_df, res)
+    }
+  }
+
+  return(result_df)
+}
+```
+
+
+## Ahmedabad Correlations
+
+```{r, echo = TRUE}
+df <- read_csv(here("data/Ahmedabad/dataset_Ahmedabad_2023.csv"))
+## filter to 1997-2011
+
+ahm_rh <- compute_correlations(df, "hadISD", 2011, "Ahmedabad")
+ahm_max_temp <- compute_correlations(df, "Max_Temp", 2011, "Ahmedabad")
+ahm_mean_temp <- compute_correlations(df, "Mean_Temp", 2011, "Ahmedabad")
+ahm_min_temp <- compute_correlations(df, "Min_Temp", 2011, "Ahmedabad")
+```
+
+## Surat Correlations
+
+```{r, echo = TRUE}
+df <- read_csv(here("data/Surat/dataset_Surat_2023.csv"))
+## filter to 1997-2016
+
+surat_rh <- compute_correlations(df, "hadISD", 2016, "Surat")
+surat_max_temp <- compute_correlations(df, "Max_Temp", 2016, "Surat")
+surat_mean_temp <- compute_correlations(df, "Mean_Temp", 2016, "Surat")
+surat_min_temp <- compute_correlations(df, "Min_Temp", 2016, "Surat")
+```
+
+## Plot
+
+```{r}
+
+bind_rows(ahm_rh, ahm_max_temp, ahm_min_temp, ahm_mean_temp,
+surat_rh,surat_max_temp, surat_mean_temp, surat_min_temp) |>
+mutate(covariate = case_when(
+  covariate == "hadISD" ~ "Relative Humidity",
+  covariate == "Max_Temp" ~ "Maximum Temperature",
+  covariate == "Min_Temp" ~ "Minimum Temperature",
+  covariate == "Mean_Temp" ~ "Mean Temperature")) |>
+  ggplot(aes(x = start_window, y = end_window, fill = correlation)) +
+  facet_grid(rows = vars(city), cols = vars(covariate)) +
+  geom_tile() +
+  geom_text(
+    aes(label = sprintf("%.2f", correlation), color = abs(correlation) > 0.5),
+    size = 2.5, show.legend = FALSE
+  ) +
+  scale_color_manual(values = c(`FALSE` = "black", `TRUE` = "white")) +
+  scico::scale_fill_scico(palette = "vik", limits = c(-1, 1), midpoint = 0, name = "Correlation") +
+  scale_x_continuous(breaks = 1:12, labels = month.abb) +
+  scale_y_continuous(breaks = 1:12, labels = month.abb) +
+  labs(x = "Window start month", y = "Window end month") +
+  theme_minimal(base_size = 14, base_family = "sans") +
+  theme(
+    axis.line = element_line(color = "black"),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    text = element_text(family = "Helvetica"),
+    legend.position = "bottom"
+  )
+
+ggsave("figures/correlations_plot.pdf", width = 14, height = 8, dpi = 600)  
+```

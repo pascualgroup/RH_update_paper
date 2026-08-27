@@ -3,9 +3,6 @@ title: "Results yearly prediction"
 author: "Leonardo Souto Ferreira"
 date: today
 format: html
-knitr:
-  opts_knit:
-    root.dir: "/home/leonardo/Doutorado/humidity_malaria_update/"
 geometry:
   - margin=2cm
 warning: false
@@ -19,10 +16,11 @@ fig-height: 6
 
 
 ```{r, fig.width = 8, fig.height = 6, message = FALSE}
-source("R/simulation_functions.R")
-source("R/cleaning_profile_results.R")
-source("R/run_manifest.R")
-source("R/mcap.R")
+proj_root <- rprojroot::find_root(rprojroot::has_file("DESCRIPTION"))
+setwd(proj_root)
+knitr::opts_knit$set(root.dir = proj_root)
+pkgload::load_all(proj_root)
+library(tidyverse)
 library(future.apply)
 ```
 

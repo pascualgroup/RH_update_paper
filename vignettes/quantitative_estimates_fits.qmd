@@ -3,9 +3,6 @@ title: "Quantitative estimates of the fits"
 author: "Leonardo Souto Ferreira"
 date: today
 format: html
-knitr:
-  opts_knit:
-    root.dir: "/home/leonardo/Doutorado/RH_update_paper/"
 geometry:
   - margin=2cm
 warning: false
@@ -22,11 +19,11 @@ the training period and for the testing (out-of-sample) period, and the
 testing period is further split into before and after 2019.
 
 ```{r setup, include=FALSE, message=FALSE}
-library(here)
-source("R/simulation_functions.R")
-source("R/cleaning_profile_results.R")
-source("R/run_manifest.R")
-source("R/mcap.R")
+proj_root <- rprojroot::find_root(rprojroot::has_file("DESCRIPTION"))
+setwd(proj_root)
+knitr::opts_knit$set(root.dir = proj_root)
+pkgload::load_all(proj_root)
+library(tidyverse)
 library(ggrepel)
 library(ggpubr)
 library(sf)
@@ -260,7 +257,7 @@ crps_summary |>
   mutate(across(is.numeric, function(x) {
     round(x, digits = 2)
   })) |>
-  write_csv(here("prediction_statistics.csv"))
+  write_csv(here::here("prediction_statistics.csv"))
 ```
 
 ```{r crps-summary-plot, fig.height=5}

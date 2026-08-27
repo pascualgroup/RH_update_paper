@@ -15,11 +15,9 @@
 # SLURM_PROCID: the process ID within the job (for manifest filenames)
 # SLURM_LOCALID: the local task ID on the node (for manifest filenames)
 
-# assumes current working directory is the package root
-# and that the package is installed and all dependencies are available
-source("R/run_manifest.R")
-source("R/simulation_functions.R")
-source("R/save_safe.R")
+# assumes the rhmalaria package is installed (see README.md for cluster
+# install instructions); current working directory does not matter
+library(rhmalaria)
 
 run_id <- Sys.getenv("RUN_ID")
 normalize_extra <- Sys.getenv("NORMALIZE_EXTRA", unset = 1)

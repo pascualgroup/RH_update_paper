@@ -3,9 +3,6 @@ title: "Results testing"
 author: "Leonardo Souto Ferreira"
 date: today
 format: pdf
-knitr:
-  opts_knit:
-    root.dir: "/home/leonardo/Doutorado/humidity_malaria_update/"
 geometry:
   - margin=2cm
 warning: false
@@ -13,15 +10,29 @@ message: false
 echo: false
 fig-width: 8
 fig-height: 6
+execute:
+  enabled: false
 ---
+
+::: {.callout-note}
+Code execution is disabled for this document (`execute: enabled: false`):
+it reads `results/aggregated/combined_results_<RUN_ID>_refined_second.csv`,
+the aggregated output of one specific past fitting run, which isn't part of
+this repository and only exists on the machine/cluster that produced it.
+Render it on its own (`quarto render vignettes/create_profile_grids.qmd
+--execute`) once you have a matching results file and have updated the
+hard-coded `RUN_ID` below.
+:::
 
 
 
 
 ```{r, fig.width = 8, fig.height = 6, message = FALSE}
-source("R/simulation_functions.R")
-source("R/cleaning_profile_results.R")
-source("R/run_manifest.R")
+proj_root <- rprojroot::find_root(rprojroot::has_file("DESCRIPTION"))
+setwd(proj_root)
+knitr::opts_knit$set(root.dir = proj_root)
+pkgload::load_all(proj_root)
+library(tidyverse)
 library(rstatix)
 
 

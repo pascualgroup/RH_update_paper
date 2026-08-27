@@ -1,6 +1,40 @@
-library(dplyr)
-library(ggplot2)
-
+#' Compute a Monte Carlo Adjusted Profile (MCAP) confidence interval
+#'
+#' Implements the MCAP method (Ionides et al.) for turning a noisy
+#' Monte-Carlo profile log-likelihood into a smoothed profile and a
+#' confidence interval for one parameter. The profile is smoothed with
+#' loess, a weighted local quadratic is fit near the smoothed maximum, and
+#' the resulting curvature is used to combine statistical and Monte-Carlo
+#' (simulation) uncertainty into an inflated log-likelihood cutoff.
+#'
+#' @param lp Numeric vector of profile log-likelihood values.
+#' @param parameter Numeric vector of parameter values corresponding to
+#'   `lp` (same length).
+#' @param confidence Confidence level for the interval.
+#' @param lambda Loess span, and fraction of points (nearest to the
+#'   smoothed maximum) used to weight the local quadratic fit.
+#' @param Ngrid Number of points in the grid used to evaluate the loess
+#'   smooth and locate the confidence interval.
+#'
+#' @return A list with elements: `lp`, `parameter`, `confidence` (the
+#'   inputs); `quadratic_fit` (the weighted local `lm` fit); `quadratic_max`
+#'   (vertex of the quadratic fit); `smooth_fit` (the `loess` object);
+#'   `fit` (data frame with columns `parameter`, `smoothed`, `quadratic`
+#'   giving the loess and quadratic predictions on the grid); `mle`
+#'   (parameter value maximizing the smoothed profile); `ci` (two-element
+#'   vector, the MCAP confidence interval); `delta` (the log-likelihood
+#'   drop used as the CI cutoff); `se_stat`, `se_mc`, `se` (statistical,
+#'   Monte Carlo, and total standard errors of the estimate).
+#'
+#' @details The local quadratic is parameterized as
+#'   `lp = c - a * parameter^2 + b * parameter`, so its curvature `a` and
+#'   the sampling variance of `a` and `b` are used to estimate both the
+#'   Monte Carlo variance (`se_mc`) coming from simulation noise in `lp`
+#'   and the usual statistical variance (`se_stat`). `delta` inflates the
+#'   classical `qchisq(confidence, df = 1) / 2` cutoff by a term
+#'   proportional to `se_mc` so the resulting `ci` accounts for both
+#'   sources of uncertainty.
+#' @export
 mcap <- function(lp, parameter, confidence = 0.95, lambda = 0.75, Ngrid = 1000) {
   smooth_fit <- loess(lp ~ parameter, span = lambda)
   parameter_grid <- seq(min(parameter, na.rm = T), max(parameter, na.rm = T), length.out = Ngrid)
@@ -41,6 +75,37 @@ mcap <- function(lp, parameter, confidence = 0.95, lambda = 0.75, Ngrid = 1000) 
   )
 }
 
+#' Compute an MCAP profile using a classical, non-Monte-Carlo-adjusted cutoff
+#'
+#' A variant of [mcap()] that smooths and fits the local quadratic the same
+#' way, but ignores the Monte Carlo variance term when defining the
+#' confidence interval. Use this when the profile is believed to be
+#' essentially noise-free (e.g. profile points already well-converged) and
+#' a plain likelihood-ratio cutoff is preferred over the MC-inflated one.
+#'
+#' @param lp Numeric vector of profile log-likelihood values.
+#' @param parameter Numeric vector of parameter values corresponding to
+#'   `lp` (same length).
+#' @param confidence Confidence level for the interval.
+#' @param lambda Loess span, and fraction of points (nearest to the
+#'   smoothed maximum) used to weight the local quadratic fit.
+#' @param Ngrid Number of points in the grid used to evaluate the loess
+#'   smooth and locate the confidence interval.
+#'
+#' @return A list with the same elements as [mcap()]: `lp`, `parameter`,
+#'   `confidence`, `quadratic_fit`, `quadratic_max`, `smooth_fit`, `fit`,
+#'   `mle`, `ci`, `delta`, `se_stat`, `se_mc`, `se`.
+#'
+#' @details Differs from [mcap()] in two ways. First, the loess smoother is
+#'   fit with `loess.control(surface = "direct")`, computing exact
+#'   predictions instead of the (faster, approximate) default interpolation
+#'   surface. Second, and more importantly, `delta` is set to the plain
+#'   `qchisq(confidence, df = 1) / 2` cutoff rather than [mcap()]'s
+#'   MC-inflated cutoff — `se_mc` and `se_stat` are still computed and
+#'   returned, but `se_mc` is not folded into `delta`, so the resulting
+#'   `ci` is a classical profile-likelihood interval that does not account
+#'   for Monte Carlo noise in `lp`.
+#' @export
 simple_mcap <- function(lp, parameter, confidence = 0.95, lambda = 0.75, Ngrid = 1000) {
   smooth_fit <- loess(lp ~ parameter, span = lambda, control = loess.control(surface = "direct"))
   parameter_grid <- seq(min(parameter, na.rm = T), max(parameter, na.rm = T), length.out = Ngrid)
@@ -81,6 +146,27 @@ simple_mcap <- function(lp, parameter, confidence = 0.95, lambda = 0.75, Ngrid =
   )
 }
 
+#' Plot an MCAP profile with its confidence interval
+#'
+#' Builds a diagnostic plot of a profile log-likelihood together with its
+#' MCAP smoothing and confidence interval, as returned by [mcap()],
+#' [simple_mcap()], or the concave case of [mcap_checked()].
+#'
+#' @param mcap_output A list as returned by [mcap()] / [simple_mcap()] /
+#'   [mcap_checked()], containing at least `parameter`, `lp`, `fit`, `ci`,
+#'   and `delta`.
+#' @param font_size Base font size passed to `theme_bw()`.
+#'
+#' @return A ggplot object showing the loess-smoothed profile (blue line),
+#'   the raw profile log-likelihood points, the maximizing point
+#'   (highlighted in green), the confidence-interval bounds (vertical
+#'   dashed lines), and the log-likelihood cutoff used to define them
+#'   (horizontal line). The plot title reports the MLE and CI bounds.
+#'
+#' @details Infinite CI bounds (as can occur when the cutoff is never
+#'   crossed within the explored grid) are replaced with the min/max of the
+#'   observed parameter values so the plot always has finite limits.
+#' @export
 mcap_plot <- function(mcap_output, font_size = 16) {
   p <- with(mcap_output, {
     data_points <- data.frame(
@@ -112,6 +198,22 @@ mcap_plot <- function(mcap_output, font_size = 16) {
   return(p)
 }
 
+#' Bin a dataset into quantile groups of a column
+#'
+#' Cuts a numeric column into `n_quantiles` equal-probability quantile bins
+#' and adds the bin membership and numeric bin edges as new columns. Used by
+#' [plot_mcap_binned()] and [plot_simple_CI()] to thin dense profile output
+#' before fitting MCAP.
+#'
+#' @param dataset A data frame or tibble.
+#' @param column_name Character scalar naming the numeric column to bin.
+#' @param n_quantiles Number of quantile bins to create.
+#'
+#' @return `dataset` with additional columns: `quantile` (a factor giving
+#'   the bin interval label from `cut()`), and `start`, `end` (numeric
+#'   lower/upper edges of that interval, parsed out of the `quantile`
+#'   label).
+#' @export
 bin_by_quantile <- function(dataset, column_name, n_quantiles = 20) {
   cut_borders <- function(x) {
     pattern <- "(\\(|\\[)(-*[0-9]+\\.*[0-9]*),(-*[0-9]+\\.*[0-9]*)(\\)|\\])"
@@ -128,6 +230,38 @@ bin_by_quantile <- function(dataset, column_name, n_quantiles = 20) {
   return(dataset)
 }
 
+#' Build an MCAP profile-likelihood plot from binned, thinned profile output
+#'
+#' Thins a raw profile-likelihood dataset (typically many Monte Carlo
+#' replicates per parameter value) by binning `column_name` into quantiles
+#' and keeping only the highest-loglik rows per bin, then fits [mcap()] to
+#' the thinned data and plots the result with [mcap_plot()].
+#'
+#' @param dataset A data frame with (at least) columns `loglik` and
+#'   `column_name`.
+#' @param column_name Character scalar naming the parameter column to
+#'   profile over.
+#' @param n_quantiles Number of quantile bins passed to
+#'   [bin_by_quantile()].
+#' @param max_per_bin Maximum number of highest-`loglik` rows kept per
+#'   quantile bin.
+#' @param diff_LL Optional numeric; if supplied, rows with `loglik` more
+#'   than `diff_LL` below the maximum `loglik` are dropped before binning.
+#' @param remove_outlier Logical; whether to filter outlying values of
+#'   `column_name` after binning/thinning.
+#' @param zscore Logical; if `TRUE` outliers are removed using an absolute
+#'   z-score threshold of 2, otherwise using 1.5*IQR fences.
+#'
+#' @return A ggplot object (from [mcap_plot()]) with `column_name` as the
+#'   x-axis label and `"loglikelihood"` as the y-axis label.
+#'
+#' @details Pipeline: drop incomplete rows, optionally drop rows far below
+#'   the maximum `loglik` (`diff_LL`), bin by quantile of `column_name`
+#'   ([bin_by_quantile()]), keep the top `max_per_bin` rows by `loglik` in
+#'   each bin, optionally remove outliers in `column_name`, then call
+#'   [mcap()] on the thinned `(loglik, column_name)` pairs and plot the
+#'   result with [mcap_plot()].
+#' @export
 plot_mcap_binned <- function(dataset, column_name, n_quantiles = 20, max_per_bin = 20, diff_LL = NULL, remove_outlier = TRUE, zscore = TRUE) {
   dataset <- dataset[complete.cases(dataset), ]
   if (!is.null(diff_LL)) {
@@ -177,6 +311,40 @@ plot_mcap_binned <- function(dataset, column_name, n_quantiles = 20, max_per_bin
   return(p)
 }
 
+#' Build a classical (non-MC-adjusted) profile-likelihood plot from binned output
+#'
+#' Same thinning-and-plotting idea as [plot_mcap_binned()], but fits
+#' [simple_mcap()] instead of [mcap()], and removes outliers in
+#' `column_name` before binning rather than after.
+#'
+#' @param dataset A data frame with (at least) columns `loglik` and
+#'   `column_name`.
+#' @param column_name Character scalar naming the parameter column to
+#'   profile over.
+#' @param n_quantiles Number of quantile bins passed to
+#'   [bin_by_quantile()].
+#' @param max_per_bin Maximum number of highest-`loglik` rows kept per
+#'   quantile bin.
+#' @param diff_LL Optional numeric; if supplied, rows with `loglik` more
+#'   than `diff_LL` below the maximum `loglik` are dropped before outlier
+#'   removal and binning.
+#' @param remove_outlier Logical; whether to filter outlying values of
+#'   `column_name` before binning.
+#' @param zscore Logical; if `TRUE` outliers are removed using an absolute
+#'   z-score threshold of 2, otherwise using 1.5*IQR fences.
+#'
+#' @return A ggplot object (from [mcap_plot()]) with `column_name` as the
+#'   x-axis label and `"loglikelihood"` as the y-axis label.
+#'
+#' @details Pipeline: drop incomplete rows, optionally drop rows far below
+#'   the maximum `loglik` (`diff_LL`), optionally remove outliers in
+#'   `column_name`, bin by quantile of `column_name`
+#'   ([bin_by_quantile()]) and keep the top `max_per_bin` rows by `loglik`
+#'   in each bin, then call [simple_mcap()] on the thinned pairs. The
+#'   resulting `delta` is then explicitly overwritten with
+#'   `qchisq(0.95, df = 1) / 2` (the classical 95% cutoff regardless of
+#'   any other confidence level) before plotting with [mcap_plot()].
+#' @export
 plot_simple_CI <- function(dataset, column_name, n_quantiles = 20, max_per_bin = 20, diff_LL = NULL, remove_outlier = TRUE, zscore = TRUE) {
   dataset <- dataset[complete.cases(dataset), ]
 
@@ -215,6 +383,70 @@ plot_simple_CI <- function(dataset, column_name, n_quantiles = 20, max_per_bin =
   return(p)
 }
 
+#' Compute an MCAP profile with diagnostics and safeguards against degenerate profiles
+#'
+#' A defensive variant of [mcap()] that sanitizes its inputs and adds
+#' diagnostics so that pathological profiles (a non-concave local quadratic
+#' fit, a maximum at the edge of the explored range, too few distinct
+#' parameter values near the maximum, or a confidence cutoff never crossed
+#' within the explored grid) are reported explicitly via a `status` flag
+#' vector instead of silently producing a nonsensical or infinite-bounded
+#' confidence interval.
+#'
+#' @param lp Numeric vector of profile log-likelihood values.
+#' @param parameter Numeric vector of parameter values corresponding to
+#'   `lp` (same length).
+#' @param confidence Confidence level for the interval.
+#' @param lambda Loess span, and (for the local quadratic fit) target
+#'   fraction of points nearest the smoothed maximum to include.
+#' @param Ngrid Number of points in the grid used to evaluate the loess
+#'   smooth and locate the confidence interval.
+#' @param external_mle Optional externally-known MLE for `parameter`. If
+#'   supplied, its smoothed log-likelihood is compared to the profile's
+#'   smoothed maximum and the gap is reported as `mle_gap`, as a
+#'   diagnostic of agreement between the profile and an independently
+#'   obtained MLE.
+#' @param edge_fraction Fraction of the observed `parameter` range treated
+#'   as "near the boundary"; used to flag (`peak_at_edge`) when the
+#'   smoothed maximum falls within this margin of either end.
+#' @param min_local_unique Minimum number of distinct `parameter` values
+#'   required within the local quadratic-fit neighborhood; below this,
+#'   `status` includes `"few_local_x"`.
+#'
+#' @return A list with the same core elements as [mcap()] (`lp`,
+#'   `parameter`, `confidence`, `quadratic_fit`, `quadratic_max`,
+#'   `smooth_fit`, `fit`, `mle`, `ci`, `delta`, `se_stat`, `se_mc`, `se`),
+#'   plus diagnostic fields: `quadratic_stationary` (the quadratic fit's
+#'   vertex regardless of concavity; `quadratic_max` is `NA` unless the fit
+#'   is concave), `a`, `b` (quadratic fit coefficients), `concave`
+#'   (logical), `ci_valid` (`FALSE` when the quadratic fit is not concave,
+#'   in which case `ci` is only the explored `parameter` range rather than
+#'   a true MCAP interval), `ci_truncated` (named logical vector with
+#'   elements `lower`/`upper`, flagging sides where the log-likelihood
+#'   cutoff was never crossed within the explored grid, so the edge of the
+#'   explored range was used instead), `ci_type` (one of `"mcap"`,
+#'   `"mcap_beyond_lower_range"`, `"mcap_beyond_upper_range"`,
+#'   `"mcap_beyond_both_ranges"`, or `"explored_range"`), `explored_range`
+#'   (range of the valid grid points), `peak_at_edge`, `n_unique_local`,
+#'   `mle_gap`, and `status` (character vector of diagnostic flags such as
+#'   `"non_concave"`, `"peak_at_edge"`, `"few_local_x"`,
+#'   `"left_unbounded"`, `"right_unbounded"`, or `"ok"`).
+#'
+#' @details Non-finite `(lp, parameter)` pairs are dropped up front. The
+#'   local quadratic is parameterized as
+#'   `lp = c - a * parameter^2 + b * parameter`, so `a > 0` is required for
+#'   it to be concave (a genuine local maximum) and for the MCAP variance
+#'   and cutoff formulas to be valid. If the fit is not concave, the
+#'   function returns early: `ci` is set to the explored `parameter` range,
+#'   `ci_valid` is `FALSE`, and `status` includes `"non_concave"`. If the
+#'   fit is concave, `delta` is computed the same way as in [mcap()]
+#'   (MC-adjusted cutoff). The function then checks, separately on each
+#'   side of the maximum, whether the log-likelihood actually drops below
+#'   `delta` before the edge of the evaluated grid is reached; if not, that
+#'   side of `ci` is set to the edge of the explored range instead of being
+#'   left unbounded, and is flagged via `ci_truncated`/`status`
+#'   (`"left_unbounded"`/`"right_unbounded"`) and reflected in `ci_type`.
+#' @export
 mcap_checked <- function(
   lp,
   parameter,

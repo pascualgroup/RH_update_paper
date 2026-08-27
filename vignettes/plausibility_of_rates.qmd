@@ -3,9 +3,6 @@ title: "Plausibility of biological rates"
 author: "Leonardo Souto Ferreira"
 date: today
 format: html
-knitr:
-  opts_knit:
-    root.dir: "/home/leonardo/Doutorado/humidity_malaria_update/"
 geometry:
   - margin=2cm
 warning: false
@@ -19,11 +16,11 @@ fig-height: 4
 
 ```{r setup, include=FALSE, message=FALSE}
 knitr::opts_chunk$set(autodep = TRUE)
-library(here)
-source("R/simulation_functions.R")
-source("R/cleaning_profile_results.R")
-source("R/run_manifest.R")
-source("R/mcap.R")
+proj_root <- rprojroot::find_root(rprojroot::has_file("DESCRIPTION"))
+setwd(proj_root)
+knitr::opts_knit$set(root.dir = proj_root)
+pkgload::load_all(proj_root)
+library(tidyverse)
 library(ggrepel)
 library(ggpubr)
 library(sf)
@@ -54,14 +51,20 @@ fit_and_predict <- function(city, model, covariate_var, profile_file,
 
   top_params <- all_res |> get_top_sample(k = 1)
 
+  ## Simulate over the full interval instead of switching to a blind,
+  ## particle-filter-reseeded forecast at the fit's end_year: push the
+  ## training/simulation boundary out to (almost) end_year_prediction, and
+  ## pin `actual_end_year` to the original fit's end_year so the covariate
+  ## normalization still matches what the parameters were estimated against.
   top_params |>
     predict_model_states(city,
       n_sims = n_sims,
       model = model, covariate = covariate_var,
       start_year = start_year, start_month = 1,
-      end_year = end_year, end_month = 12,
+      end_year = end_year_prediction - 1, end_month = 12,
       end_year_prediction = end_year_prediction, end_month_prediction = 12,
       window_start = window_start, window_end = window_end,
+      actual_end_year = end_year, actual_end_month = 12,
       dataset = paste0("data/", city, "/dataset_", city, "_2023.csv"),
       output_format = "data.frame"
     ) |>
@@ -117,30 +120,56 @@ all_results <- predictions$result |>
 head(all_results)
 ```
 
+## Plot palette
+
+Shared look for the facet plots below, matching the minimal theme used
+across the manuscript figures (e.g. `theme_profile()` in
+`parameter_profiles.qmd`, `plot_prediction_panel()` in `new_figures.qmd`).
+The training/prediction split no longer means anything for these two plots
+(the models are now simulated over the full interval, see `fit_and_predict()`
+above), so both plots treat all rows as one continuous series.
+
+```{r palette}
+CI <- 0.95
+line_color <- "#0072B2"
+ribbon_color <- "#B3D5E6"
+
+theme_facets <- function(base_size = 12) {
+  theme_minimal(base_size = base_size, base_family = "sans") +
+    theme(
+      axis.line = element_line(color = "black"),
+      legend.position = "none",
+      panel.grid.minor = element_blank(),
+      text = element_text(family = "Helvetica")
+    )
+}
+```
+
 ## Prevalence plots
 
-```{r, dependson="helpers"}
+```{r, dependson=c("helpers", "palette")}
 
 all_results |>
   filter(.id != "data") |>
   mutate(.id = as.numeric(.id)) |>
   ggplot(aes(x = time, y = (S1 + S2) / (S1 + S2 + E + I2 + I1))) +
   facet_grid(cols = vars(covariate_var), rows = vars(city)) +
-  ggdist::stat_lineribbon(linewidth = 0.7) +
-  theme_bw(12)
+  ggdist::stat_lineribbon(.width = CI, linewidth = 0.7, color = line_color, fill = ribbon_color) +
+  labs(x = "Time", y = "Susceptible fraction") +
+  theme_facets()
 ```
 
 
 ## Transmission Rate plots
 
-```{r}
+```{r, dependson=c("helpers", "palette")}
 all_results |>
   filter(.id != "data") |>
   mutate(.id = as.numeric(.id)) |>
   mutate(beta = exp(b1 * season1 + b2 * season2 + b3 * season3 + b4 * season4 +
     b5 * season5 + b6 * season6 + season4 * bH * covariate)) |>
   group_by(city, covariate_var, time) |>
-  summarize(beta = mean(beta, na.rm = TRUE)) |>
+  summarize(beta = mean(beta, na.rm = TRUE), .groups = "drop") |>
   mutate(
     year = floor(time),
     month = round((time - year) * 12 + 1)
@@ -151,6 +180,9 @@ all_results |>
     scales = "free_y"
   ) +
   geom_line(color = "grey70") +
-  stat_summary(fun = median, geom = "line", aes(group = 1), color = "blue", size = 0.5) +
-  theme_bw(12)
+  stat_summary(fun = median, geom = "line", aes(group = 1), color = line_color, linewidth = 0.7) +
+  scale_x_continuous(breaks = seq(1, 12, by = 2), labels = month.abb[seq(1, 12, by = 2)]) +
+  labs(x = "Month", y = "Transmission rate") +
+  theme_facets() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```

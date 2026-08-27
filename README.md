@@ -243,6 +243,15 @@ cluster, this whole sweep (one array job per parameter) is what
 - **new_figures.qmd** — main manuscript figures, including model
   predictions, covariate correlation/wavelet-coherence, and covariate
   scaling-window diagnostics.
+- **climate_correlations.qmd** — correlation between transmission-season
+  (Aug-Nov) case counts and every possible start/end-month covariate window,
+  for relative humidity and temperature in both cities; visualized as a
+  start-vs-end-month heatmap (the basis for picking `window_start`/
+  `window_end` elsewhere).
+- **malaria_suitability.qmd** — a temperature-driven vectorial-capacity
+  suitability index (from mosquito trait curves) for comparison stations in
+  the endemic states of Odisha, Jharkhand, and Chhattisgarh, contrasting a
+  baseline period against later years via permutation-style histograms.
 
 ## Documentation site
 

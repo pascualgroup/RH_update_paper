@@ -432,7 +432,7 @@
     "href": "index.html",
     "title": "rhmalaria",
     "section": "",
-    "text": "Research compendium for a mechanistic Plasmodium falciparum transmission model relating malaria transmission to relative humidity and maximum temperature in Ahmedabad and Surat, India. The transmission model is a pomp-based compartmental model (susceptible/exposed/infectious stages, climate-driven transmission rate) fit to monthly case-count and climate data via iterated filtering and profile likelihood.\nThis repository is organized as a “semi-package”: the reusable modeling code lives in R/ and is documented with roxygen2, while the analysis pipeline itself lives in vignettes/ as Quarto documents that call into R/.\n\n\n# CRAN + GitHub dependencies (reads them straight from DESCRIPTION):\ninstall.packages(\"remotes\")\nremotes::install_deps(dependencies = TRUE)\n\n# Then, from the repository root:\ndevtools::load_all()\nThe vignettes themselves locate the repository root with rprojroot (rprojroot::find_root(rprojroot::has_file(\"DESCRIPTION\"))) and call pkgload::load_all() on it in their first chunk, so they don’t need the package pre-installed — running quarto render vignettes/&lt;name&gt;.qmd (or altdoc::render_docs()) from anywhere inside the repository is enough.\n\n\n\nThe fitting/profiling pipeline is designed to run as SLURM array jobs from scripts/. Unlike the vignettes, the job scripts (scripts/run_fitting.R, scripts/run_profile.R) expect the package to be properly installed (library(rhmalaria)), not load_all()-ed, since each array task starts a fresh R CMD BATCH process.\n\nInstall once per cluster environment (e.g. in your $HOME, before syncing to scratch — see the sync logic in scripts/run_fitting.sh):\nmodule load r/4.5.1   # or whatever R module the cluster provides\nRscript -e 'install.packages(\"remotes\"); remotes::install_deps(dependencies = TRUE)'\nRscript -e 'remotes::install_local(\".\", dependencies = FALSE, force = TRUE)'\n(scripts/install_packages.R is an older, hand-maintained equivalent of the remotes::install_deps() step above, kept for reference; DESCRIPTION is now the source of truth for dependencies.)\nSubmit a fitting run: scripts/submit_run_and_combine.sh submits the run_fitting.sh array job and, with a dependency, the combine_array_outputs.sh aggregator that runs once the array completes:\n./scripts/submit_run_and_combine.sh --array 1-100\nrun_fitting.sh itself syncs the repo to $SCRATCH, loads the r module, and runs R CMD BATCH --vanilla --args &lt;city&gt; &lt;model&gt; &lt;covariate&gt; &lt;window_start&gt; &lt;window_end&gt; &lt;VC_file&gt; scripts/run_fitting.R per array task — edit the hard-coded --args line (and #SBATCH resources) for the city/model/window you want to fit.\nSubmit a profile-likelihood sweep: scripts/profile_loop.sh loops over every model parameter and calls scripts/submit_profile.sh (which runs scripts/run_profile.R) for each one:\nRUN_ID=my_run bash scripts/profile_loop.sh\n\nBoth run_fitting.R and run_profile.R read their remaining configuration from SLURM environment variables (SLURM_ARRAY_TASK_ID, RUN_ID, END_YEAR, …) and command-line arguments; see the comment block at the top of each script for the full list.\n\n\n\nCase/climate data lives under data/&lt;City&gt;/, one CSV per city (e.g. data/Ahmedabad/dataset_Ahmedabad_2023.csv). This is the file you pass as fit_model(dataset = ...). It’s a monthly time series, one row per month, with (at least) these columns:\n\n\n\n\n\n\n\ncolumn\nmeaning\n\n\n\n\ntime\nfractional-year time index (year + (month - 1) / 12); the pomp time axis\n\n\nyear, month\ncalendar year and month\n\n\npop\npopulation size that month\n\n\ndpopdt\npopulation growth rate (re-derived/smoothed internally; can be 0 in the raw file)\n\n\nPF\nobserved P. falciparum case count — the value the model is fit to\n\n\nseason1 … season6\nprecomputed seasonal basis: the fraction of that month falling in each of 6 two-month blocks of the calendar year (the regressors for the seasonal transmission-rate coefficients b1…b6)\n\n\nclimate covariate columns\none column per candidate climate driver, e.g. hadISD (relative humidity), Max_Temp, Min_Temp, Mean_Temp\n\n\n\nfit_model()’s covariate argument names one of those climate columns; window_start/window_end pick which calendar months of that covariate get averaged into a single yearly value (e.g. window_start = 8, window_end = 9 averages August-September), which is then min-max normalized over the fitting period and used as the covariate term in the transmission-rate equation below.\n\n\n\nThree model variants live in dynamical_model/fitting/pomp_object_&lt;model&gt;.R and are selected with fit_model(model = ...). All three share the same compartmental structure (S1 -&gt; E -&gt; I1 -&gt; S2 -&gt; I2 -&gt; S1, i.e. susceptible, exposed, first infection, partially-immune susceptible, reinfection, with waning immunity); they differ only in the transmission-rate term betaIN:\n\nbaseline — seasonal transmission only, no climate covariate: betaIN = exp(b1*season1 + ... + b6*season6).\ninf_exponent — the main climate-driven model: adds a covariate term on top of the August-September (season4) seasonal block: betaIN = exp(b1*season1 + ... + b6*season6 + season4*bH*covariate).\ninf_exponent_scaled — inf_exponent plus one extra multiplicative parameter scaled_b: betaIN = scaled_b * exp(...). Used by the sliding-window sensitivity analysis (vignettes/refitting_window.qmd, refitting_window_plot.qmd, results_reffiting.qmd) to ask how much the already-fitted seasonal/climate shape would need to be rescaled to match observed cases in a given out-of-sample year.\n\n\n\n\nfit_model() is the main entry point: it preprocesses dataset, builds the pomp object for model, and runs pomp::mif2() (iterated filtering) from one or more starting parameter vectors.\nlibrary(rhmalaria)\n\n# `parameters` must be a data.frame/tibble, one row per starting point —\n# fit_model()/mif2() multi-start from every row (in parallel across\n# `n_cores` when allow_parallel = TRUE). A bare named vector is *not*\n# accepted here even though some lower-level helpers allow one.\nstart &lt;- data.frame(\n  sigOBS = 0.138, sigPRO = 0.14, muS2S1 = 2.06, muEI1 = 23.7, muI1S2 = 10.6,\n  muI2S2 = 1.99, betaOUT = 5.77e-05, delta = 0.02, rho = 0.012, tau = 0.00619,\n  q0 = 0.987, alpha = 0.502,\n  b1 = -2.91, b2 = -1.15, b3 = -3.51, b4 = 1.09, b5 = -0.756, b6 = -0.0211,\n  bH = 1.51,\n  S1_0 = 0.302, E_0 = 0.000621, I1_0 = 0.00492, S2_0 = 0.606, I2_0 = 0.0868,\n  K_0 = 0.0499, F_0 = 0.715\n)\n\nfit &lt;- fit_model(\n  parameters = start,\n  city = \"Ahmedabad\",\n  model = \"inf_exponent\",\n  covariate = \"hadISD\",\n  start_year = 1997, start_month = 1,\n  end_year = 2011, end_month = 12,\n  window_start = 8, window_end = 9,\n  dataset = \"data/Ahmedabad/dataset_Ahmedabad_2023.csv\",\n  mode = \"refined_second\", # `start` above is already a good fit; polish it\n  output_to_file = FALSE\n)\n\nfit$result # one row per starting point: fitted params + loglik + flag (1 = converged)\nmode controls how far mif2 is allowed to move the parameters per iteration: \"fit\" (large random-walk steps, for a rough/unfitted starting guess) -&gt; \"refined\" -&gt; \"refined_second\" (tiny steps, for polishing an already-good fit, as in the example above). The standard pipeline (see scripts/run_profile.R / scripts/run_fitting.R) starts an unfitted grid at \"fit\" and chains all three stages, each one re-starting mif2 from the best rows (arrange(desc(loglik))) of the previous stage’s fit$result. Iterated filtering is stochastic, so with a real (not artificially small) Np/Nmif some starting rows can still fail to converge — that’s what the flag column and the filter(flag == 1) step are for; production runs multi-start from many rows precisely because a few are expected to fail.\n\n\n\nProfile likelihood for a parameter (say b6) reuses the exact same fit_model() call, with two additions:\n\nparameters becomes a grid: a set of starting rows that all fix b6 at the same value but vary every other parameter (one CSV per grid point, e.g. param_grids/Surat/Max_Temp/param_grid_b6.csv). vignettes/create_profile_grids.qmd builds these grids from an initial unconstrained fit.\nprofile_var = \"b6\" tells generate_rw_sd() to give b6 a random-walk standard deviation of 0, so mif2 never moves it while every other parameter is still refined:\n\nfit_model(\n  parameters = read.csv(\"param_grids/Surat/Max_Temp/param_grid_b6.csv\"),\n  city = \"Surat\", model = \"inf_exponent\", covariate = \"Max_Temp\",\n  window_start = 5, window_end = 9,\n  dataset = \"data/Surat/dataset_Surat_2023.csv\",\n  profile_var = \"b6\",\n  mode = \"fit\", output_to_file = FALSE\n)\nRunning this (through the \"fit\"/\"refined\"/\"refined_second\" stages) across every grid point for b6 and collecting the log-likelihoods traces out the profile. clean_profile() (R/cleaning_profile_results.R) combines the per-parameter result CSVs into one table, and mcap()/mcap_checked() (R/mcap.R) turn the noisy Monte Carlo profile into a smoothed profile and confidence interval — see vignettes/parameter_profiles.qmd. On the cluster, this whole sweep (one array job per parameter) is what scripts/profile_loop.sh / scripts/submit_profile.sh automate.\n\n\n\n\nsimulation_functions.R — preprocess climate/case data, build and fit the pomp transmission model, simulate/forecast from fitted parameters (training-period simulation plus out-of-sample forecasting), and produce the associated diagnostic plots.\nmcap.R — the Monte Carlo Adjusted Profile (MCAP) method for turning a noisy profile log-likelihood into a smoothed profile and confidence interval, plus supporting binned-diagnostic plots.\ncleaning_profile_results.R — combine and clean per-parameter profile-likelihood result CSVs produced by the fitting pipeline.\nplot_wavelet.R — wavelet power/coherence diagnostic plots from WaveletComp-style wavelet-analysis objects.\nrun_manifest.R / save_safe.R — atomic JSON/CSV write helpers and run-manifest bookkeeping used by the cluster (SLURM) fitting jobs in scripts/.\n\n\n\n\n\ncreate_profile_grids.qmd — build the parameter grids used to launch the profile-likelihood fitting jobs.\nparameter_profiles.qmd — profile-likelihood curves and MCAP confidence intervals for the fitted model parameters.\nquantitative_estimates_fits.qmd — fit each city/covariate model, simulate from the fitted posterior, and score against observed cases with CRPS over training and out-of-sample (pre-/post-2019) periods.\ncrps_code.qmd — CRPS scoring exploration used for the sliding-window refitting analysis (window-length sensitivity).\nrefitting_window.qmd / refitting_window_plot.qmd — repeated re-fitting over a sliding window of training-period lengths.\nresults_reffiting.qmd — results of the yearly re-fitting/prediction analysis.\nplausibility_of_rates.qmd — biologically-plausibility checks on the fitted model: susceptible-fraction trajectory and seasonal transmission rate over the full study period.\nnew_figures.qmd — main manuscript figures, including model predictions, covariate correlation/wavelet-coherence, and covariate scaling-window diagnostics.\n\n\n\n\nFunction reference (from roxygen2) and the vignettes above are built into a static site with altdoc:\naltdoc::render_docs()",
+    "text": "Research compendium for a mechanistic Plasmodium falciparum transmission model relating malaria transmission to relative humidity and maximum temperature in Ahmedabad and Surat, India. The transmission model is a pomp-based compartmental model (susceptible/exposed/infectious stages, climate-driven transmission rate) fit to monthly case-count and climate data via iterated filtering and profile likelihood.\nThis repository is organized as a “semi-package”: the reusable modeling code lives in R/ and is documented with roxygen2, while the analysis pipeline itself lives in vignettes/ as Quarto documents that call into R/.\n\n\n# CRAN + GitHub dependencies (reads them straight from DESCRIPTION):\ninstall.packages(\"remotes\")\nremotes::install_deps(dependencies = TRUE)\n\n# Then, from the repository root:\ndevtools::load_all()\nThe vignettes themselves locate the repository root with rprojroot (rprojroot::find_root(rprojroot::has_file(\"DESCRIPTION\"))) and call pkgload::load_all() on it in their first chunk, so they don’t need the package pre-installed — running quarto render vignettes/&lt;name&gt;.qmd (or altdoc::render_docs()) from anywhere inside the repository is enough.\n\n\n\nThe fitting/profiling pipeline is designed to run as SLURM array jobs from scripts/. Unlike the vignettes, the job scripts (scripts/run_fitting.R, scripts/run_profile.R) expect the package to be properly installed (library(rhmalaria)), not load_all()-ed, since each array task starts a fresh R CMD BATCH process.\n\nInstall once per cluster environment (e.g. in your $HOME, before syncing to scratch — see the sync logic in scripts/run_fitting.sh):\nmodule load r/4.5.1   # or whatever R module the cluster provides\nRscript -e 'install.packages(\"remotes\"); remotes::install_deps(dependencies = TRUE)'\nRscript -e 'remotes::install_local(\".\", dependencies = FALSE, force = TRUE)'\n(scripts/install_packages.R is an older, hand-maintained equivalent of the remotes::install_deps() step above, kept for reference; DESCRIPTION is now the source of truth for dependencies.)\nSubmit a fitting run: scripts/submit_run_and_combine.sh submits the run_fitting.sh array job and, with a dependency, the combine_array_outputs.sh aggregator that runs once the array completes:\n./scripts/submit_run_and_combine.sh --array 1-100\nrun_fitting.sh itself syncs the repo to $SCRATCH, loads the r module, and runs R CMD BATCH --vanilla --args &lt;city&gt; &lt;model&gt; &lt;covariate&gt; &lt;window_start&gt; &lt;window_end&gt; &lt;VC_file&gt; scripts/run_fitting.R per array task — edit the hard-coded --args line (and #SBATCH resources) for the city/model/window you want to fit.\nSubmit a profile-likelihood sweep: scripts/profile_loop.sh loops over every model parameter and calls scripts/submit_profile.sh (which runs scripts/run_profile.R) for each one:\nRUN_ID=my_run bash scripts/profile_loop.sh\n\nBoth run_fitting.R and run_profile.R read their remaining configuration from SLURM environment variables (SLURM_ARRAY_TASK_ID, RUN_ID, END_YEAR, …) and command-line arguments; see the comment block at the top of each script for the full list.\n\n\n\nCase/climate data lives under data/&lt;City&gt;/, one CSV per city (e.g. data/Ahmedabad/dataset_Ahmedabad_2023.csv). This is the file you pass as fit_model(dataset = ...). It’s a monthly time series, one row per month, with (at least) these columns:\n\n\n\n\n\n\n\ncolumn\nmeaning\n\n\n\n\ntime\nfractional-year time index (year + (month - 1) / 12); the pomp time axis\n\n\nyear, month\ncalendar year and month\n\n\npop\npopulation size that month\n\n\ndpopdt\npopulation growth rate (re-derived/smoothed internally; can be 0 in the raw file)\n\n\nPF\nobserved P. falciparum case count — the value the model is fit to\n\n\nseason1 … season6\nprecomputed seasonal basis: the fraction of that month falling in each of 6 two-month blocks of the calendar year (the regressors for the seasonal transmission-rate coefficients b1…b6)\n\n\nclimate covariate columns\none column per candidate climate driver, e.g. hadISD (relative humidity), Max_Temp, Min_Temp, Mean_Temp\n\n\n\nfit_model()’s covariate argument names one of those climate columns; window_start/window_end pick which calendar months of that covariate get averaged into a single yearly value (e.g. window_start = 8, window_end = 9 averages August-September), which is then min-max normalized over the fitting period and used as the covariate term in the transmission-rate equation below.\n\n\n\nThree model variants live in dynamical_model/fitting/pomp_object_&lt;model&gt;.R and are selected with fit_model(model = ...). All three share the same compartmental structure (S1 -&gt; E -&gt; I1 -&gt; S2 -&gt; I2 -&gt; S1, i.e. susceptible, exposed, first infection, partially-immune susceptible, reinfection, with waning immunity); they differ only in the transmission-rate term betaIN:\n\nbaseline — seasonal transmission only, no climate covariate: betaIN = exp(b1*season1 + ... + b6*season6).\ninf_exponent — the main climate-driven model: adds a covariate term on top of the August-September (season4) seasonal block: betaIN = exp(b1*season1 + ... + b6*season6 + season4*bH*covariate).\ninf_exponent_scaled — inf_exponent plus one extra multiplicative parameter scaled_b: betaIN = scaled_b * exp(...). Used by the sliding-window sensitivity analysis (vignettes/refitting_window.qmd, refitting_window_plot.qmd, results_reffiting.qmd) to ask how much the already-fitted seasonal/climate shape would need to be rescaled to match observed cases in a given out-of-sample year.\n\n\n\n\nfit_model() is the main entry point: it preprocesses dataset, builds the pomp object for model, and runs pomp::mif2() (iterated filtering) from one or more starting parameter vectors.\nlibrary(rhmalaria)\n\n# `parameters` must be a data.frame/tibble, one row per starting point —\n# fit_model()/mif2() multi-start from every row (in parallel across\n# `n_cores` when allow_parallel = TRUE). A bare named vector is *not*\n# accepted here even though some lower-level helpers allow one.\nstart &lt;- data.frame(\n  sigOBS = 0.138, sigPRO = 0.14, muS2S1 = 2.06, muEI1 = 23.7, muI1S2 = 10.6,\n  muI2S2 = 1.99, betaOUT = 5.77e-05, delta = 0.02, rho = 0.012, tau = 0.00619,\n  q0 = 0.987, alpha = 0.502,\n  b1 = -2.91, b2 = -1.15, b3 = -3.51, b4 = 1.09, b5 = -0.756, b6 = -0.0211,\n  bH = 1.51,\n  S1_0 = 0.302, E_0 = 0.000621, I1_0 = 0.00492, S2_0 = 0.606, I2_0 = 0.0868,\n  K_0 = 0.0499, F_0 = 0.715\n)\n\nfit &lt;- fit_model(\n  parameters = start,\n  city = \"Ahmedabad\",\n  model = \"inf_exponent\",\n  covariate = \"hadISD\",\n  start_year = 1997, start_month = 1,\n  end_year = 2011, end_month = 12,\n  window_start = 8, window_end = 9,\n  dataset = \"data/Ahmedabad/dataset_Ahmedabad_2023.csv\",\n  mode = \"refined_second\", # `start` above is already a good fit; polish it\n  output_to_file = FALSE\n)\n\nfit$result # one row per starting point: fitted params + loglik + flag (1 = converged)\nmode controls how far mif2 is allowed to move the parameters per iteration: \"fit\" (large random-walk steps, for a rough/unfitted starting guess) -&gt; \"refined\" -&gt; \"refined_second\" (tiny steps, for polishing an already-good fit, as in the example above). The standard pipeline (see scripts/run_profile.R / scripts/run_fitting.R) starts an unfitted grid at \"fit\" and chains all three stages, each one re-starting mif2 from the best rows (arrange(desc(loglik))) of the previous stage’s fit$result. Iterated filtering is stochastic, so with a real (not artificially small) Np/Nmif some starting rows can still fail to converge — that’s what the flag column and the filter(flag == 1) step are for; production runs multi-start from many rows precisely because a few are expected to fail.\n\n\n\nProfile likelihood for a parameter (say b6) reuses the exact same fit_model() call, with two additions:\n\nparameters becomes a grid: a set of starting rows that all fix b6 at the same value but vary every other parameter (one CSV per grid point, e.g. param_grids/Surat/Max_Temp/param_grid_b6.csv). vignettes/create_profile_grids.qmd builds these grids from an initial unconstrained fit.\nprofile_var = \"b6\" tells generate_rw_sd() to give b6 a random-walk standard deviation of 0, so mif2 never moves it while every other parameter is still refined:\n\nfit_model(\n  parameters = read.csv(\"param_grids/Surat/Max_Temp/param_grid_b6.csv\"),\n  city = \"Surat\", model = \"inf_exponent\", covariate = \"Max_Temp\",\n  window_start = 5, window_end = 9,\n  dataset = \"data/Surat/dataset_Surat_2023.csv\",\n  profile_var = \"b6\",\n  mode = \"fit\", output_to_file = FALSE\n)\nRunning this (through the \"fit\"/\"refined\"/\"refined_second\" stages) across every grid point for b6 and collecting the log-likelihoods traces out the profile. clean_profile() (R/cleaning_profile_results.R) combines the per-parameter result CSVs into one table, and mcap()/mcap_checked() (R/mcap.R) turn the noisy Monte Carlo profile into a smoothed profile and confidence interval — see vignettes/parameter_profiles.qmd. On the cluster, this whole sweep (one array job per parameter) is what scripts/profile_loop.sh / scripts/submit_profile.sh automate.\n\n\n\n\nsimulation_functions.R — preprocess climate/case data, build and fit the pomp transmission model, simulate/forecast from fitted parameters (training-period simulation plus out-of-sample forecasting), and produce the associated diagnostic plots.\nmcap.R — the Monte Carlo Adjusted Profile (MCAP) method for turning a noisy profile log-likelihood into a smoothed profile and confidence interval, plus supporting binned-diagnostic plots.\ncleaning_profile_results.R — combine and clean per-parameter profile-likelihood result CSVs produced by the fitting pipeline.\nplot_wavelet.R — wavelet power/coherence diagnostic plots from WaveletComp-style wavelet-analysis objects.\nrun_manifest.R / save_safe.R — atomic JSON/CSV write helpers and run-manifest bookkeeping used by the cluster (SLURM) fitting jobs in scripts/.\n\n\n\n\n\ncreate_profile_grids.qmd — build the parameter grids used to launch the profile-likelihood fitting jobs.\nparameter_profiles.qmd — profile-likelihood curves and MCAP confidence intervals for the fitted model parameters.\nquantitative_estimates_fits.qmd — fit each city/covariate model, simulate from the fitted posterior, and score against observed cases with CRPS over training and out-of-sample (pre-/post-2019) periods.\ncrps_code.qmd — CRPS scoring exploration used for the sliding-window refitting analysis (window-length sensitivity).\nrefitting_window.qmd / refitting_window_plot.qmd — repeated re-fitting over a sliding window of training-period lengths.\nresults_reffiting.qmd — results of the yearly re-fitting/prediction analysis.\nplausibility_of_rates.qmd — biologically-plausibility checks on the fitted model: susceptible-fraction trajectory and seasonal transmission rate over the full study period.\nnew_figures.qmd — main manuscript figures, including model predictions, covariate correlation/wavelet-coherence, and covariate scaling-window diagnostics.\n\n\n\n\nFunction reference (from roxygen2) and the vignettes above are built into a static site with altdoc, published at https://pascualgroup.github.io/RH_update_paper/ (served from docs/ on main via GitHub Pages, so docs/ is committed rather than gitignored).\naltdoc::render_docs(freeze = TRUE)\nAlways pass freeze = TRUE: it skips re-knitting any vignette or man page that hasn’t changed since the last render (hashes are cached in altdoc/freeze.rds, itself gitignored/machine-local), so adding one new vignette only executes that vignette instead of re-running the whole pipeline — several of these vignettes are expensive (real pomp fitting) or memory-heavy enough to be impractical to rebuild on every change. Without freeze = TRUE (the plain altdoc::render_docs() default), everything is re-rendered from scratch every time.\nIf you change a function in R/ that a vignette depends on, the freeze cache won’t know to invalidate that vignette (it only hashes the vignette’s own source) — delete altdoc/freeze.rds, or render that vignette on its own with quarto render vignettes/&lt;name&gt;.qmd --execute, to force a refresh. Remember to run devtools::document() first if you changed any roxygen comments, so the reference pages pick up the change.\nAfter rendering, push docs/ along with your other changes to update the published site.",
     "crumbs": [
       "Home"
     ]
@@ -522,97 +522,64 @@
     "href": "index.html#documentation-site",
     "title": "rhmalaria",
     "section": "",
-    "text": "Function reference (from roxygen2) and the vignettes above are built into a static site with altdoc:\naltdoc::render_docs()",
+    "text": "Function reference (from roxygen2) and the vignettes above are built into a static site with altdoc, published at https://pascualgroup.github.io/RH_update_paper/ (served from docs/ on main via GitHub Pages, so docs/ is committed rather than gitignored).\naltdoc::render_docs(freeze = TRUE)\nAlways pass freeze = TRUE: it skips re-knitting any vignette or man page that hasn’t changed since the last render (hashes are cached in altdoc/freeze.rds, itself gitignored/machine-local), so adding one new vignette only executes that vignette instead of re-running the whole pipeline — several of these vignettes are expensive (real pomp fitting) or memory-heavy enough to be impractical to rebuild on every change. Without freeze = TRUE (the plain altdoc::render_docs() default), everything is re-rendered from scratch every time.\nIf you change a function in R/ that a vignette depends on, the freeze cache won’t know to invalidate that vignette (it only hashes the vignette’s own source) — delete altdoc/freeze.rds, or render that vignette on its own with quarto render vignettes/&lt;name&gt;.qmd --execute, to force a refresh. Remember to run devtools::document() first if you changed any roxygen comments, so the reference pages pick up the change.\nAfter rendering, push docs/ along with your other changes to update the published site.",
     "crumbs": [
       "Home"
     ]
   },
   {
-    "objectID": "vignettes/refitting_window.html",
-    "href": "vignettes/refitting_window.html",
-    "title": "Results testing",
+    "objectID": "vignettes/climate_correlations.html",
+    "href": "vignettes/climate_correlations.html",
+    "title": "Correlation plots",
     "section": "",
-    "text": "Note\n\n\n\nCode execution is disabled for this document (execute: enabled: false): the sliding-window re-fitting below repeatedly fits the pomp model and is memory-heavy enough to exhaust memory during a full documentation-site build. Render it on its own (quarto render vignettes/refitting_window.qmd --execute) when you actually need fresh output.",
+    "text": "compute_correlations &lt;- function(df, covariate, year_max, city) {\n  cases_df &lt;- df |&gt;\n    filter(year &lt;= year_max, month &gt;= 8, month &lt;= 11) |&gt;\n    group_by(year) |&gt;\n    summarize(cases = sum(PF))\n\n  covariate_df &lt;- df |&gt; filter(year &lt;= year_max) |&gt;\n   select(year, month, all_of(covariate)) |&gt;\n   rename(cov = all_of(covariate))\n  result_df &lt;- c()\n  for(i in 1:9){\n    for(j in i:9){\n      cov_df &lt;- covariate_df |&gt;\n        filter(month &gt;= i, month &lt;= j) |&gt;\n        group_by(year) |&gt;\n        summarize(cov = mean(cov))\n\n      joined &lt;- inner_join(cases_df, cov_df, by = \"year\")\n      val &lt;- cor(joined$cases, joined$cov)\n      res &lt;- tibble_row(city = city, covariate = covariate, start_window = i,\n       end_window = j, correlation = val)\n\n      result_df &lt;- rbind(result_df, res)\n    }\n  }\n\n  return(result_df)\n}",
     "crumbs": [
       "Articles",
-      "Results testing"
+      "Correlation plots"
     ]
   },
   {
-    "objectID": "vignettes/results_reffiting.html",
-    "href": "vignettes/results_reffiting.html",
-    "title": "Results yearly prediction",
+    "objectID": "vignettes/climate_correlations.html#ahmedabad-correlations",
+    "href": "vignettes/climate_correlations.html#ahmedabad-correlations",
+    "title": "Correlation plots",
+    "section": "Ahmedabad Correlations",
+    "text": "Ahmedabad Correlations\n\ndf &lt;- read_csv(here(\"data/Ahmedabad/dataset_Ahmedabad_2023.csv\"))\n## filter to 1997-2011\n\nahm_rh &lt;- compute_correlations(df, \"hadISD\", 2011, \"Ahmedabad\")\nahm_max_temp &lt;- compute_correlations(df, \"Max_Temp\", 2011, \"Ahmedabad\")\nahm_mean_temp &lt;- compute_correlations(df, \"Mean_Temp\", 2011, \"Ahmedabad\")\nahm_min_temp &lt;- compute_correlations(df, \"Min_Temp\", 2011, \"Ahmedabad\")",
+    "crumbs": [
+      "Articles",
+      "Correlation plots"
+    ]
+  },
+  {
+    "objectID": "vignettes/climate_correlations.html#surat-correlations",
+    "href": "vignettes/climate_correlations.html#surat-correlations",
+    "title": "Correlation plots",
+    "section": "Surat Correlations",
+    "text": "Surat Correlations\n\ndf &lt;- read_csv(here(\"data/Surat/dataset_Surat_2023.csv\"))\n## filter to 1997-2016\n\nsurat_rh &lt;- compute_correlations(df, \"hadISD\", 2016, \"Surat\")\nsurat_max_temp &lt;- compute_correlations(df, \"Max_Temp\", 2016, \"Surat\")\nsurat_mean_temp &lt;- compute_correlations(df, \"Mean_Temp\", 2016, \"Surat\")\nsurat_min_temp &lt;- compute_correlations(df, \"Min_Temp\", 2016, \"Surat\")",
+    "crumbs": [
+      "Articles",
+      "Correlation plots"
+    ]
+  },
+  {
+    "objectID": "vignettes/climate_correlations.html#plot",
+    "href": "vignettes/climate_correlations.html#plot",
+    "title": "Correlation plots",
+    "section": "Plot",
+    "text": "Plot",
+    "crumbs": [
+      "Articles",
+      "Correlation plots"
+    ]
+  },
+  {
+    "objectID": "vignettes/crps_code.html",
+    "href": "vignettes/crps_code.html",
+    "title": "Report",
     "section": "",
-    "text": "# A tibble: 6 × 30\n   year sigOBS sigPRO muS2S1 muEI1 muI1S2 muI2S2   betaOUT    rho     tau    bH\n  &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;     &lt;dbl&gt;  &lt;dbl&gt;   &lt;dbl&gt; &lt;dbl&gt;\n1     1  0.138  0.140   2.06  23.7   10.6   1.99 0.0000577 0.0120 0.00619  1.51\n2     2  0.138  0.140   2.06  23.7   10.6   1.99 0.0000577 0.0120 0.00619  1.51\n3     3  0.138  0.140   2.06  23.7   10.6   1.99 0.0000577 0.0120 0.00619  1.51\n4     4  0.138  0.140   2.06  23.7   10.6   1.99 0.0000577 0.0120 0.00619  1.51\n5     5  0.138  0.140   2.06  23.7   10.6   1.99 0.0000577 0.0120 0.00619  1.51\n6     6  0.138  0.140   2.06  23.7   10.6   1.99 0.0000577 0.0120 0.00619  1.51\n# ℹ 19 more variables: q0 &lt;dbl&gt;, b1 &lt;dbl&gt;, b2 &lt;dbl&gt;, b3 &lt;dbl&gt;, b4 &lt;dbl&gt;,\n#   b5 &lt;dbl&gt;, b6 &lt;dbl&gt;, delta &lt;dbl&gt;, S1_0 &lt;dbl&gt;, E_0 &lt;dbl&gt;, I1_0 &lt;dbl&gt;,\n#   S2_0 &lt;dbl&gt;, I2_0 &lt;dbl&gt;, K_0 &lt;dbl&gt;, F_0 &lt;dbl&gt;, alpha &lt;dbl&gt;, scaled_b &lt;dbl&gt;,\n#   window &lt;dbl&gt;, rep &lt;dbl&gt;",
+    "text": "sigOBS   sigPRO   muS2S1    muEI1   muI1S2   muI2S2      betaOUT\n1 0.1384905 0.139971 2.063856 23.74218 10.60705 1.985031 5.769785e-05\n         rho         tau       bH        q0        b1       b2        b3\n1 0.01199514 0.006194551 1.510865 0.9867108 -2.909269 -1.15238 -3.510415\n        b4         b5          b6 delta      S1_0          E_0        I1_0\n1 1.089299 -0.7563353 -0.02105364  0.02 0.3018204 0.0006207956 0.004922808\n       S2_0       I2_0        K_0       F_0    alpha sample    loglik loglik.se\n1 0.6058352 0.08680075 0.04985306 0.7153055 0.502269   1827 -881.2262 0.1857334\n  flag\n1    1\n\n\n\n\n# A tibble: 18,720 × 6\n   sample  time   size window  fixed    diff\n   &lt;chr&gt;  &lt;dbl&gt;  &lt;dbl&gt;  &lt;int&gt;  &lt;dbl&gt;   &lt;dbl&gt;\n 1 1      2012   15.3       2  17.2     1.85\n 2 1      2012.   4.92      2  20.9    16.0 \n 3 1      2012.   7.84      2  19.1    11.3 \n 4 1      2012.   2.22      2   8.05    5.83\n 5 1      2012.  13.7       2   6.05   -7.65\n 6 1      2012.  10.6       2   4.06   -6.55\n 7 1      2012.  12.3       2   9.24   -3.07\n 8 1      2013. 354.        2 241.   -113.  \n 9 1      2013. 431.        2 287.   -144.  \n10 1      2013. 256.        2 170.    -86.0 \n# ℹ 18,710 more rows",
     "crumbs": [
       "Articles",
-      "Results yearly prediction"
-    ]
-  },
-  {
-    "objectID": "vignettes/refitting_window_plot.html",
-    "href": "vignettes/refitting_window_plot.html",
-    "title": "Yearly refitting Ahmedabad",
-    "section": "",
-    "text": "Median (line) and min-max range across the 10 Monte Carlo replicates (ribbon) of the estimated scaling factor, by last year of the historical fitting window, faceted by window length. The dashed line marks 2018, the last year before the abrupt change in reported cases.",
-    "crumbs": [
-      "Articles",
-      "Yearly refitting Ahmedabad"
-    ]
-  },
-  {
-    "objectID": "vignettes/refitting_window_plot.html#panel-a-coefficient-in-time",
-    "href": "vignettes/refitting_window_plot.html#panel-a-coefficient-in-time",
-    "title": "Yearly refitting Ahmedabad",
-    "section": "",
-    "text": "Median (line) and min-max range across the 10 Monte Carlo replicates (ribbon) of the estimated scaling factor, by last year of the historical fitting window, faceted by window length. The dashed line marks 2018, the last year before the abrupt change in reported cases.",
-    "crumbs": [
-      "Articles",
-      "Yearly refitting Ahmedabad"
-    ]
-  },
-  {
-    "objectID": "vignettes/refitting_window_plot.html#panel-b-crps-by-window-length",
-    "href": "vignettes/refitting_window_plot.html#panel-b-crps-by-window-length",
-    "title": "Yearly refitting Ahmedabad",
-    "section": "Panel B: CRPS by window length",
-    "text": "Panel B: CRPS by window length\nFor each historical window length and each of the 10 parameter replicates, this re-simulates the model’s one-year-ahead rolling forecasts (simulate_yearly_prediction, model = \"inf_exponent_scaled\") and scores them against the observed cases with the empirical-distribution CRPS (scoringRules::crps_sample(method = \"edf\")), the same scoring approach used in quantitative_estimates_fits.qmd.\nThis is expensive: 13 window lengths x 10 replicates x 1000 simulations each. Results are cached to aggregated_results/crps_by_window_{city}_{covariate}.csv so re-rendering this document doesn’t repeat the computation; delete that file to force a re-run.\n\n\n# A tibble: 6 × 6\n   time type       observed score   rep window\n  &lt;dbl&gt; &lt;chr&gt;         &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;  &lt;dbl&gt;\n1 2012  prediction       86 14.6      1      2\n2 2012. prediction       22  5.10     1      2\n3 2012. prediction       11  7.83     1      2\n4 2012. prediction       18  2.28     1      2\n5 2012. prediction       32 13.6      1      2\n6 2012. prediction       29 10.4      1      2",
-    "crumbs": [
-      "Articles",
-      "Yearly refitting Ahmedabad"
-    ]
-  },
-  {
-    "objectID": "vignettes/refitting_window_plot.html#combined-figure",
-    "href": "vignettes/refitting_window_plot.html#combined-figure",
-    "title": "Yearly refitting Ahmedabad",
-    "section": "Combined figure",
-    "text": "Combined figure",
-    "crumbs": [
-      "Articles",
-      "Yearly refitting Ahmedabad"
-    ]
-  },
-  {
-    "objectID": "vignettes/new_figures.html",
-    "href": "vignettes/new_figures.html",
-    "title": "Correlation and coherence",
-    "section": "",
-    "text": "Figure 1: case time series, covariate correlations, and station map\n\n\n\n\n\n\n\n\nLoading basemap 'world_physical_map' from map service 'esri'...\n\n\n\n\n\n\n\n\nFigure: wavelet power spectra\n\n\n\n\n\n\n\n\nFigure: cross wavelet power\n\n\n\n\n\n\n\n\nFigure: wavelet coherence\n\n\n\n\n\n\n\n\nFigures 2 and 3: model predictions with best-fit parameters\nSM Figure, prediction from 2019 onwards Ahmedabad\nFigure: scaled covariate windows",
-    "crumbs": [
-      "Articles",
-      "Correlation and coherence"
-    ]
-  },
-  {
-    "objectID": "vignettes/parameter_profiles.html",
-    "href": "vignettes/parameter_profiles.html",
-    "title": "Parameter profiles",
-    "section": "",
-    "text": "Parameter transforms\nAll four profile files were produced with the inf_exponent model, so the estimation-scale transform is the one defined in dynamical_model/fitting/pomp_object_inf_exponent.R (fed to pomp via parameter_trans(log=, logit=, barycentric=) in prepare_pomp_model()). MCAP’s loess/quadratic machinery assumes an approximately quadratic log-likelihood surface, which only holds on the scale the model was actually fit on — so profile CIs need to be computed after transforming to that scale, then mapped back to the natural scale for plotting.\nPlot conventions\nPoints are Monte Carlo log-likelihood evaluations; the blue curve is the MCAP-smoothed profile. The vermillion line/point mark the true MLE (the single best fit across the whole file, the same for every panel); the orange dashed lines mark the 95% MCAP confidence limits. Each panel’s label reads MLE [CI low, CI high] (Δ=delta): a &lt;/&gt; prefix on a bound means it’s just the edge of the explored range, not a real MCAP crossing (fit wasn’t concave, or too few points), and delta is the log-likelihood drop used to define the CI (NA when non-concave). The y-axis is log-likelihood relative to the true MLE, shared across panels; x-axes stay free per panel. Parameters are fit and profiled on their estimation scale (see “Parameter transforms” above) and shown here back-transformed; plot_profile_group_transformed() shows the estimation-scale version.\nHelper functions\nAhmedabad, relative humidity\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nAhmedabad, maximum temperature\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nSurat, relative humidity\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nSurat, maximum temperature",
-    "crumbs": [
-      "Articles",
-      "Parameter profiles"
+      "Report"
     ]
   },
   {
@@ -671,14 +638,91 @@
     ]
   },
   {
-    "objectID": "vignettes/crps_code.html",
-    "href": "vignettes/crps_code.html",
-    "title": "Report",
+    "objectID": "vignettes/parameter_profiles.html",
+    "href": "vignettes/parameter_profiles.html",
+    "title": "Parameter profiles",
     "section": "",
-    "text": "sigOBS   sigPRO   muS2S1    muEI1   muI1S2   muI2S2      betaOUT\n1 0.1384905 0.139971 2.063856 23.74218 10.60705 1.985031 5.769785e-05\n         rho         tau       bH        q0        b1       b2        b3\n1 0.01199514 0.006194551 1.510865 0.9867108 -2.909269 -1.15238 -3.510415\n        b4         b5          b6 delta      S1_0          E_0        I1_0\n1 1.089299 -0.7563353 -0.02105364  0.02 0.3018204 0.0006207956 0.004922808\n       S2_0       I2_0        K_0       F_0    alpha sample    loglik loglik.se\n1 0.6058352 0.08680075 0.04985306 0.7153055 0.502269   1827 -881.2262 0.1857334\n  flag\n1    1\n\n\n\n\n# A tibble: 18,720 × 6\n   sample  time   size window  fixed    diff\n   &lt;chr&gt;  &lt;dbl&gt;  &lt;dbl&gt;  &lt;int&gt;  &lt;dbl&gt;   &lt;dbl&gt;\n 1 1      2012   15.3       2  17.2     1.85\n 2 1      2012.   4.92      2  20.9    16.0 \n 3 1      2012.   7.84      2  19.1    11.3 \n 4 1      2012.   2.22      2   8.05    5.83\n 5 1      2012.  13.7       2   6.05   -7.65\n 6 1      2012.  10.6       2   4.06   -6.55\n 7 1      2012.  12.3       2   9.24   -3.07\n 8 1      2013. 354.        2 241.   -113.  \n 9 1      2013. 431.        2 287.   -144.  \n10 1      2013. 256.        2 170.    -86.0 \n# ℹ 18,710 more rows",
+    "text": "Parameter transforms\nAll four profile files were produced with the inf_exponent model, so the estimation-scale transform is the one defined in dynamical_model/fitting/pomp_object_inf_exponent.R (fed to pomp via parameter_trans(log=, logit=, barycentric=) in prepare_pomp_model()). MCAP’s loess/quadratic machinery assumes an approximately quadratic log-likelihood surface, which only holds on the scale the model was actually fit on — so profile CIs need to be computed after transforming to that scale, then mapped back to the natural scale for plotting.\nPlot conventions\nPoints are Monte Carlo log-likelihood evaluations; the blue curve is the MCAP-smoothed profile. The vermillion line/point mark the true MLE (the single best fit across the whole file, the same for every panel); the orange dashed lines mark the 95% MCAP confidence limits. Each panel’s label reads MLE [CI low, CI high] (Δ=delta): a &lt;/&gt; prefix on a bound means it’s just the edge of the explored range, not a real MCAP crossing (fit wasn’t concave, or too few points), and delta is the log-likelihood drop used to define the CI (NA when non-concave). The y-axis is log-likelihood relative to the true MLE, shared across panels; x-axes stay free per panel. Parameters are fit and profiled on their estimation scale (see “Parameter transforms” above) and shown here back-transformed; plot_profile_group_transformed() shows the estimation-scale version.\nHelper functions\nAhmedabad, relative humidity\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nAhmedabad, maximum temperature\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nSurat, relative humidity\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nSurat, maximum temperature",
     "crumbs": [
       "Articles",
-      "Report"
+      "Parameter profiles"
+    ]
+  },
+  {
+    "objectID": "vignettes/new_figures.html",
+    "href": "vignettes/new_figures.html",
+    "title": "Correlation and coherence",
+    "section": "",
+    "text": "Figure 1: case time series, covariate correlations, and station map\n\n\n\n\n\n\n\n\nLoading basemap 'world_physical_map' from map service 'esri'...\n\n\n\n\n\n\n\n\nFigure: wavelet power spectra\n\n\n\n\n\n\n\n\nFigure: cross wavelet power\n\n\n\n\n\n\n\n\nFigure: wavelet coherence\n\n\n\n\n\n\n\n\nFigures 2 and 3: model predictions with best-fit parameters\nSM Figure, prediction from 2019 onwards Ahmedabad\nFigure: scaled covariate windows",
+    "crumbs": [
+      "Articles",
+      "Correlation and coherence"
+    ]
+  },
+  {
+    "objectID": "vignettes/refitting_window_plot.html",
+    "href": "vignettes/refitting_window_plot.html",
+    "title": "Yearly refitting Ahmedabad",
+    "section": "",
+    "text": "Median (line) and min-max range across the 10 Monte Carlo replicates (ribbon) of the estimated scaling factor, by last year of the historical fitting window, faceted by window length. The dashed line marks 2018, the last year before the abrupt change in reported cases.",
+    "crumbs": [
+      "Articles",
+      "Yearly refitting Ahmedabad"
+    ]
+  },
+  {
+    "objectID": "vignettes/refitting_window_plot.html#panel-a-coefficient-in-time",
+    "href": "vignettes/refitting_window_plot.html#panel-a-coefficient-in-time",
+    "title": "Yearly refitting Ahmedabad",
+    "section": "",
+    "text": "Median (line) and min-max range across the 10 Monte Carlo replicates (ribbon) of the estimated scaling factor, by last year of the historical fitting window, faceted by window length. The dashed line marks 2018, the last year before the abrupt change in reported cases.",
+    "crumbs": [
+      "Articles",
+      "Yearly refitting Ahmedabad"
+    ]
+  },
+  {
+    "objectID": "vignettes/refitting_window_plot.html#panel-b-crps-by-window-length",
+    "href": "vignettes/refitting_window_plot.html#panel-b-crps-by-window-length",
+    "title": "Yearly refitting Ahmedabad",
+    "section": "Panel B: CRPS by window length",
+    "text": "Panel B: CRPS by window length\nFor each historical window length and each of the 10 parameter replicates, this re-simulates the model’s one-year-ahead rolling forecasts (simulate_yearly_prediction, model = \"inf_exponent_scaled\") and scores them against the observed cases with the empirical-distribution CRPS (scoringRules::crps_sample(method = \"edf\")), the same scoring approach used in quantitative_estimates_fits.qmd.\nThis is expensive: 13 window lengths x 10 replicates x 1000 simulations each. Results are cached to aggregated_results/crps_by_window_{city}_{covariate}.csv so re-rendering this document doesn’t repeat the computation; delete that file to force a re-run.\n\n\n# A tibble: 6 × 6\n   time type       observed score   rep window\n  &lt;dbl&gt; &lt;chr&gt;         &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;  &lt;dbl&gt;\n1 2012  prediction       86 14.6      1      2\n2 2012. prediction       22  5.10     1      2\n3 2012. prediction       11  7.83     1      2\n4 2012. prediction       18  2.28     1      2\n5 2012. prediction       32 13.6      1      2\n6 2012. prediction       29 10.4      1      2",
+    "crumbs": [
+      "Articles",
+      "Yearly refitting Ahmedabad"
+    ]
+  },
+  {
+    "objectID": "vignettes/refitting_window_plot.html#combined-figure",
+    "href": "vignettes/refitting_window_plot.html#combined-figure",
+    "title": "Yearly refitting Ahmedabad",
+    "section": "Combined figure",
+    "text": "Combined figure",
+    "crumbs": [
+      "Articles",
+      "Yearly refitting Ahmedabad"
+    ]
+  },
+  {
+    "objectID": "vignettes/results_reffiting.html",
+    "href": "vignettes/results_reffiting.html",
+    "title": "Results yearly prediction",
+    "section": "",
+    "text": "# A tibble: 6 × 30\n   year sigOBS sigPRO muS2S1 muEI1 muI1S2 muI2S2   betaOUT    rho     tau    bH\n  &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;     &lt;dbl&gt;  &lt;dbl&gt;   &lt;dbl&gt; &lt;dbl&gt;\n1     1  0.138  0.140   2.06  23.7   10.6   1.99 0.0000577 0.0120 0.00619  1.51\n2     2  0.138  0.140   2.06  23.7   10.6   1.99 0.0000577 0.0120 0.00619  1.51\n3     3  0.138  0.140   2.06  23.7   10.6   1.99 0.0000577 0.0120 0.00619  1.51\n4     4  0.138  0.140   2.06  23.7   10.6   1.99 0.0000577 0.0120 0.00619  1.51\n5     5  0.138  0.140   2.06  23.7   10.6   1.99 0.0000577 0.0120 0.00619  1.51\n6     6  0.138  0.140   2.06  23.7   10.6   1.99 0.0000577 0.0120 0.00619  1.51\n# ℹ 19 more variables: q0 &lt;dbl&gt;, b1 &lt;dbl&gt;, b2 &lt;dbl&gt;, b3 &lt;dbl&gt;, b4 &lt;dbl&gt;,\n#   b5 &lt;dbl&gt;, b6 &lt;dbl&gt;, delta &lt;dbl&gt;, S1_0 &lt;dbl&gt;, E_0 &lt;dbl&gt;, I1_0 &lt;dbl&gt;,\n#   S2_0 &lt;dbl&gt;, I2_0 &lt;dbl&gt;, K_0 &lt;dbl&gt;, F_0 &lt;dbl&gt;, alpha &lt;dbl&gt;, scaled_b &lt;dbl&gt;,\n#   window &lt;dbl&gt;, rep &lt;dbl&gt;",
+    "crumbs": [
+      "Articles",
+      "Results yearly prediction"
+    ]
+  },
+  {
+    "objectID": "vignettes/refitting_window.html",
+    "href": "vignettes/refitting_window.html",
+    "title": "Results testing",
+    "section": "",
+    "text": "Note\n\n\n\nCode execution is disabled for this document (execute: enabled: false): the sliding-window re-fitting below repeatedly fits the pomp model and is memory-heavy enough to exhaust memory during a full documentation-site build. Render it on its own (quarto render vignettes/refitting_window.qmd --execute) when you actually need fresh output.",
+    "crumbs": [
+      "Articles",
+      "Results testing"
     ]
   },
   {

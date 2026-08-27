@@ -1,13 +1,12 @@
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
-
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
 <meta charset="utf-8">
 <meta name="generator" content="quarto-1.8.24">
-
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-
-
-<title>plot_mcap_binned – rhmalaria</title>
+<meta name="author" content="Leonardo Souto Ferreira">
+<meta name="dcterms.date" content="2026-08-27">
+<title>Correlation plots – rhmalaria</title>
 <style>
 code{white-space: pre-wrap;}
 span.smallcaps{font-variant: small-caps;}
@@ -20,8 +19,42 @@ ul.task-list li input[type="checkbox"] {
   margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
   vertical-align: middle;
 }
+/* CSS for syntax highlighting */
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
 </style>
-
 
 <script src="../site_libs/quarto-nav/quarto-nav.js"></script>
 <script src="../site_libs/quarto-nav/headroom.min.js"></script>
@@ -40,8 +73,7 @@ ul.task-list li input[type="checkbox"] {
 <link href="../site_libs/quarto-html/quarto-syntax-highlighting-dc55a5b9e770e841cd82e46aadbfb9b0.css" rel="stylesheet" id="quarto-text-highlighting-styles">
 <script src="../site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="../site_libs/bootstrap/bootstrap-28d76cd103c8f19be61d947dd52caca9.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
-<script id="quarto-search-options" type="application/json">{
+<link href="../site_libs/bootstrap/bootstrap-28d76cd103c8f19be61d947dd52caca9.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light"><script id="quarto-search-options" type="application/json">{
   "location": "navbar",
   "copy-button": false,
   "collapse-after": 3,
@@ -68,16 +100,11 @@ ul.task-list li input[type="checkbox"] {
     "search-label": "Search"
   }
 }</script>
-
-
 </head>
-
 <body class="nav-sidebar floating nav-fixed quarto-light">
 
 <div id="quarto-search-results"></div>
-  <header id="quarto-header" class="headroom fixed-top">
-    <nav class="navbar navbar-expand-lg " data-bs-theme="dark">
-      <div class="navbar-container container-fluid">
+  <header id="quarto-header" class="headroom fixed-top"><nav class="navbar navbar-expand-lg " data-bs-theme="dark"><div class="navbar-container container-fluid">
       <div class="navbar-brand-container mx-auto">
     <a href="../index.html" class="navbar-brand navbar-brand-logo">
     </a>
@@ -90,35 +117,28 @@ ul.task-list li input[type="checkbox"] {
   <span class="navbar-toggler-icon"></span>
 </button>
           <div class="collapse navbar-collapse" id="navbarCollapse">
-            <ul class="navbar-nav navbar-nav-scroll ms-auto">
-</ul>
-          </div> <!-- /navcollapse -->
+            <ul class="navbar-nav navbar-nav-scroll ms-auto"></ul>
+</div> <!-- /navcollapse -->
             <div class="quarto-navbar-tools">
 </div>
       </div> <!-- /container-fluid -->
-    </nav>
-  <nav class="quarto-secondary-nav">
-    <div class="container-fluid d-flex">
+    </nav><nav class="quarto-secondary-nav"><div class="container-fluid d-flex">
       <button type="button" class="quarto-btn-toggle btn" data-bs-toggle="collapse" role="button" data-bs-target=".quarto-sidebar-collapse-item" aria-controls="quarto-sidebar" aria-expanded="false" aria-label="Toggle sidebar navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
         <i class="bi bi-layout-text-sidebar-reverse"></i>
       </button>
-        <nav class="quarto-page-breadcrumbs" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="../man/bin_by_quantile.html">Reference</a></li><li class="breadcrumb-item"><a href="../man/plot_mcap_binned.html">plot_mcap_binned</a></li></ol></nav>
+        <nav class="quarto-page-breadcrumbs" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="../vignettes/climate_correlations.html">Articles</a></li><li class="breadcrumb-item"><a href="../vignettes/climate_correlations.html">Correlation plots</a></li></ol></nav>
         <a class="flex-grow-1" role="navigation" data-bs-toggle="collapse" data-bs-target=".quarto-sidebar-collapse-item" aria-controls="quarto-sidebar" aria-expanded="false" aria-label="Toggle sidebar navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">      
         </a>
     </div>
-  </nav>
-</header>
-<!-- content -->
-<div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-article page-navbar">
+  </nav></header><!-- content --><div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-article page-navbar">
 <!-- sidebar -->
-  <nav id="quarto-sidebar" class="sidebar collapse collapse-horizontal quarto-sidebar-collapse-item sidebar-navigation floating overflow-auto">
-    <div class="pt-lg-2 mt-2 text-left sidebar-header">
+  <nav id="quarto-sidebar" class="sidebar collapse collapse-horizontal quarto-sidebar-collapse-item sidebar-navigation floating overflow-auto"><div class="pt-lg-2 mt-2 text-left sidebar-header">
       <a href="../index.html" class="sidebar-logo-link">
       </a>
       </div>
     <div class="sidebar-menu-container"> 
     <ul class="list-unstyled mt-1">
-        <li class="sidebar-item">
+<li class="sidebar-item">
   <div class="sidebar-item-container"> 
   <a href="../index.html" class="sidebar-item-text sidebar-link">
  <span class="menu-text">Home</span></a>
@@ -126,16 +146,16 @@ ul.task-list li input[type="checkbox"] {
 </li>
         <li class="sidebar-item sidebar-item-section">
       <div class="sidebar-item-container"> 
-            <a class="sidebar-item-text sidebar-link text-start collapsed" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-1" role="navigation" aria-expanded="false">
+            <a class="sidebar-item-text sidebar-link text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-1" role="navigation" aria-expanded="true">
  <span class="menu-text">Articles</span></a>
-          <a class="sidebar-item-toggle text-start collapsed" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-1" role="navigation" aria-expanded="false" aria-label="Toggle section">
+          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-1" role="navigation" aria-expanded="true" aria-label="Toggle section">
             <i class="bi bi-chevron-right ms-2"></i>
           </a> 
       </div>
-      <ul id="quarto-sidebar-section-1" class="collapse list-unstyled sidebar-section depth1 ">  
-          <li class="sidebar-item">
+      <ul id="quarto-sidebar-section-1" class="collapse list-unstyled sidebar-section depth1 show">
+<li class="sidebar-item">
   <div class="sidebar-item-container"> 
-  <a href="../vignettes/climate_correlations.html" class="sidebar-item-text sidebar-link">
+  <a href="../vignettes/climate_correlations.html" class="sidebar-item-text sidebar-link active">
  <span class="menu-text">Correlation plots</span></a>
   </div>
 </li>
@@ -200,17 +220,17 @@ ul.task-list li input[type="checkbox"] {
   </div>
 </li>
       </ul>
-  </li>
+</li>
         <li class="sidebar-item sidebar-item-section">
       <div class="sidebar-item-container"> 
-            <a class="sidebar-item-text sidebar-link text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-2" role="navigation" aria-expanded="true">
+            <a class="sidebar-item-text sidebar-link text-start collapsed" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-2" role="navigation" aria-expanded="false">
  <span class="menu-text">Reference</span></a>
-          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-2" role="navigation" aria-expanded="true" aria-label="Toggle section">
+          <a class="sidebar-item-toggle text-start collapsed" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-2" role="navigation" aria-expanded="false" aria-label="Toggle section">
             <i class="bi bi-chevron-right ms-2"></i>
           </a> 
       </div>
-      <ul id="quarto-sidebar-section-2" class="collapse list-unstyled sidebar-section depth1 show">  
-          <li class="sidebar-item">
+      <ul id="quarto-sidebar-section-2" class="collapse list-unstyled sidebar-section depth1 ">
+<li class="sidebar-item">
   <div class="sidebar-item-container"> 
   <a href="../man/bin_by_quantile.html" class="sidebar-item-text sidebar-link">
  <span class="menu-text">bin_by_quantile</span></a>
@@ -284,7 +304,7 @@ ul.task-list li input[type="checkbox"] {
 </li>
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
-  <a href="../man/plot_mcap_binned.html" class="sidebar-item-text sidebar-link active">
+  <a href="../man/plot_mcap_binned.html" class="sidebar-item-text sidebar-link">
  <span class="menu-text">plot_mcap_binned</span></a>
   </div>
 </li>
@@ -439,7 +459,7 @@ ul.task-list li input[type="checkbox"] {
   </div>
 </li>
       </ul>
-  </li>
+</li>
         <li class="sidebar-item">
   <div class="sidebar-item-container"> 
   <a href="../LICENSE.html" class="sidebar-item-text sidebar-link">
@@ -453,113 +473,102 @@ ul.task-list li input[type="checkbox"] {
   </div>
 </li>
     </ul>
-    </div>
-</nav>
-<div id="quarto-sidebar-glass" class="quarto-sidebar-collapse-item" data-bs-toggle="collapse" data-bs-target=".quarto-sidebar-collapse-item"></div>
+</div>
+</nav><div id="quarto-sidebar-glass" class="quarto-sidebar-collapse-item" data-bs-toggle="collapse" data-bs-target=".quarto-sidebar-collapse-item"></div>
 <!-- margin-sidebar -->
     <div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
         
     <div class="quarto-code-links"><h2>Code Links</h2><ul><li><a href="undefined"><i class="bi bi-link-45deg"></i></a></li></ul></div></div>
 <!-- main -->
-<main class="content" id="quarto-document-content"><header id="title-block-header" class="quarto-title-block"><nav class="quarto-page-breadcrumbs quarto-title-breadcrumbs d-none d-lg-block" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="../man/bin_by_quantile.html">Reference</a></li><li class="breadcrumb-item"><a href="../man/plot_mcap_binned.html">plot_mcap_binned</a></li></ol></nav></header>
+<main class="content" id="quarto-document-content"><header id="title-block-header" class="quarto-title-block default"><nav class="quarto-page-breadcrumbs quarto-title-breadcrumbs d-none d-lg-block" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="../vignettes/climate_correlations.html">Articles</a></li><li class="breadcrumb-item"><a href="../vignettes/climate_correlations.html">Correlation plots</a></li></ol></nav><div class="quarto-title">
+<h1 class="title">Correlation plots</h1>
+</div>
 
 
 
+<div class="quarto-title-meta">
 
-<section id="build-an-mcap-profile-likelihood-plot-from-binned-thinned-profile-output" class="level2 unnumbered">
-<h2 class="unnumbered anchored" data-anchor-id="build-an-mcap-profile-likelihood-plot-from-binned-thinned-profile-output">Build an MCAP profile-likelihood plot from binned, thinned profile output</h2>
-<section id="description" class="level3">
-<h3 class="anchored" data-anchor-id="description">Description</h3>
-<p>Thins a raw profile-likelihood dataset (typically many Monte Carlo replicates per parameter value) by binning <code>column_name</code> into quantiles and keeping only the highest-loglik rows per bin, then fits <code>mcap()</code> to the thinned data and plots the result with <code>mcap_plot()</code>.</p>
-</section>
-<section id="usage" class="level3">
-<h3 class="anchored" data-anchor-id="usage">Usage</h3>
-<pre><code class="language-R">plot_mcap_binned(
-  dataset,
-  column_name,
-  n_quantiles = 20,
-  max_per_bin = 20,
-  diff_LL = NULL,
-  remove_outlier = TRUE,
-  zscore = TRUE
-)
-</code></pre>
-</section>
-<section id="arguments" class="level3">
-<h3 class="anchored" data-anchor-id="arguments">Arguments</h3>
-<table role="presentation">
-<tbody><tr>
-<td style="white-space: collapse; font-family: monospace; vertical-align: top">
-<code id="dataset">dataset</code>
-</td>
-<td>
-A data frame with (at least) columns <code>loglik</code> and <code>column_name</code>.
-</td>
-</tr>
-<tr>
-<td style="white-space: collapse; font-family: monospace; vertical-align: top">
-<code id="column_name">column_name</code>
-</td>
-<td>
-Character scalar naming the parameter column to profile over.
-</td>
-</tr>
-<tr>
-<td style="white-space: collapse; font-family: monospace; vertical-align: top">
-<code id="n_quantiles">n_quantiles</code>
-</td>
-<td>
-Number of quantile bins passed to <code>bin_by_quantile()</code>.
-</td>
-</tr>
-<tr>
-<td style="white-space: collapse; font-family: monospace; vertical-align: top">
-<code id="max_per_bin">max_per_bin</code>
-</td>
-<td>
-Maximum number of highest-<code>loglik</code> rows kept per quantile bin.
-</td>
-</tr>
-<tr>
-<td style="white-space: collapse; font-family: monospace; vertical-align: top">
-<code id="diff_LL">diff_LL</code>
-</td>
-<td>
-Optional numeric; if supplied, rows with <code>loglik</code> more than <code>diff_LL</code> below the maximum <code>loglik</code> are dropped before binning.
-</td>
-</tr>
-<tr>
-<td style="white-space: collapse; font-family: monospace; vertical-align: top">
-<code id="remove_outlier">remove_outlier</code>
-</td>
-<td>
-Logical; whether to filter outlying values of <code>column_name</code> after binning/thinning.
-</td>
-</tr>
-<tr>
-<td style="white-space: collapse; font-family: monospace; vertical-align: top">
-<code id="zscore">zscore</code>
-</td>
-<td>
-Logical; if <code>TRUE</code> outliers are removed using an absolute z-score threshold of 2, otherwise using 1.5*IQR fences.
-</td>
-</tr>
-</tbody></table>
-</section>
-<section id="details" class="level3">
-<h3 class="anchored" data-anchor-id="details">Details</h3>
-<p>Pipeline: drop incomplete rows, optionally drop rows far below the maximum <code>loglik</code> (<code>diff_LL</code>), bin by quantile of <code>column_name</code> (<code>bin_by_quantile()</code>), keep the top <code>max_per_bin</code> rows by <code>loglik</code> in each bin, optionally remove outliers in <code>column_name</code>, then call <code>mcap()</code> on the thinned <code style="white-space: pre;">(loglik, column_name)</code> pairs and plot the result with <code>mcap_plot()</code>.</p>
-</section>
-<section id="value" class="level3">
-<h3 class="anchored" data-anchor-id="value">Value</h3>
-<p>A ggplot object (from <code>mcap_plot()</code>) with <code>column_name</code> as the x-axis label and <code>“loglikelihood”</code> as the y-axis label.</p>
+    <div>
+    <div class="quarto-title-meta-heading">Author</div>
+    <div class="quarto-title-meta-contents">
+             <p>Leonardo Souto Ferreira </p>
+          </div>
+  </div>
+    
+    <div>
+    <div class="quarto-title-meta-heading">Published</div>
+    <div class="quarto-title-meta-contents">
+      <p class="date">August 27, 2026</p>
+    </div>
+  </div>
+  
+    
+  </div>
+  
 
 
-</section>
-</section>
+</header><div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb1"><pre class="downlit sourceCode r code-with-copy"><code class="sourceCode R"><span><span class="va">compute_correlations</span> <span class="op">&lt;-</span> <span class="kw">function</span><span class="op">(</span><span class="va">df</span>, <span class="va">covariate</span>, <span class="va">year_max</span>, <span class="va">city</span><span class="op">)</span> <span class="op">{</span></span>
+<span>  <span class="va">cases_df</span> <span class="op">&lt;-</span> <span class="va">df</span> <span class="op">|&gt;</span></span>
+<span>    <span class="fu"><a href="https://rdrr.io/r/stats/filter.html">filter</a></span><span class="op">(</span><span class="va">year</span> <span class="op">&lt;=</span> <span class="va">year_max</span>, <span class="va">month</span> <span class="op">&gt;=</span> <span class="fl">8</span>, <span class="va">month</span> <span class="op">&lt;=</span> <span class="fl">11</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>    <span class="fu">group_by</span><span class="op">(</span><span class="va">year</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>    <span class="fu">summarize</span><span class="op">(</span>cases <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/sum.html">sum</a></span><span class="op">(</span><span class="va">PF</span><span class="op">)</span><span class="op">)</span></span>
+<span></span>
+<span>  <span class="va">covariate_df</span> <span class="op">&lt;-</span> <span class="va">df</span> <span class="op">|&gt;</span> <span class="fu"><a href="https://rdrr.io/r/stats/filter.html">filter</a></span><span class="op">(</span><span class="va">year</span> <span class="op">&lt;=</span> <span class="va">year_max</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>   <span class="fu">select</span><span class="op">(</span><span class="va">year</span>, <span class="va">month</span>, <span class="fu">all_of</span><span class="op">(</span><span class="va">covariate</span><span class="op">)</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>   <span class="fu">rename</span><span class="op">(</span>cov <span class="op">=</span> <span class="fu">all_of</span><span class="op">(</span><span class="va">covariate</span><span class="op">)</span><span class="op">)</span></span>
+<span>  <span class="va">result_df</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html">c</a></span><span class="op">(</span><span class="op">)</span></span>
+<span>  <span class="kw">for</span><span class="op">(</span><span class="va">i</span> <span class="kw">in</span> <span class="fl">1</span><span class="op">:</span><span class="fl">9</span><span class="op">)</span><span class="op">{</span></span>
+<span>    <span class="kw">for</span><span class="op">(</span><span class="va">j</span> <span class="kw">in</span> <span class="va">i</span><span class="op">:</span><span class="fl">9</span><span class="op">)</span><span class="op">{</span></span>
+<span>      <span class="va">cov_df</span> <span class="op">&lt;-</span> <span class="va">covariate_df</span> <span class="op">|&gt;</span></span>
+<span>        <span class="fu"><a href="https://rdrr.io/r/stats/filter.html">filter</a></span><span class="op">(</span><span class="va">month</span> <span class="op">&gt;=</span> <span class="va">i</span>, <span class="va">month</span> <span class="op">&lt;=</span> <span class="va">j</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>        <span class="fu">group_by</span><span class="op">(</span><span class="va">year</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>        <span class="fu">summarize</span><span class="op">(</span>cov <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/mean.html">mean</a></span><span class="op">(</span><span class="va">cov</span><span class="op">)</span><span class="op">)</span></span>
+<span></span>
+<span>      <span class="va">joined</span> <span class="op">&lt;-</span> <span class="fu">inner_join</span><span class="op">(</span><span class="va">cases_df</span>, <span class="va">cov_df</span>, by <span class="op">=</span> <span class="st">"year"</span><span class="op">)</span></span>
+<span>      <span class="va">val</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/stats/cor.html">cor</a></span><span class="op">(</span><span class="va">joined</span><span class="op">$</span><span class="va">cases</span>, <span class="va">joined</span><span class="op">$</span><span class="va">cov</span><span class="op">)</span></span>
+<span>      <span class="va">res</span> <span class="op">&lt;-</span> <span class="fu">tibble_row</span><span class="op">(</span>city <span class="op">=</span> <span class="va">city</span>, covariate <span class="op">=</span> <span class="va">covariate</span>, start_window <span class="op">=</span> <span class="va">i</span>,</span>
+<span>       end_window <span class="op">=</span> <span class="va">j</span>, correlation <span class="op">=</span> <span class="va">val</span><span class="op">)</span></span>
+<span></span>
+<span>      <span class="va">result_df</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/cbind.html">rbind</a></span><span class="op">(</span><span class="va">result_df</span>, <span class="va">res</span><span class="op">)</span></span>
+<span>    <span class="op">}</span></span>
+<span>  <span class="op">}</span></span>
+<span></span>
+<span>  <span class="kw"><a href="https://rdrr.io/r/base/function.html">return</a></span><span class="op">(</span><span class="va">result_df</span><span class="op">)</span></span>
+<span><span class="op">}</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</div>
+<section id="ahmedabad-correlations" class="level2"><h2 class="anchored" data-anchor-id="ahmedabad-correlations">Ahmedabad Correlations</h2>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb2"><pre class="downlit sourceCode r code-with-copy"><code class="sourceCode R"><span><span class="va">df</span> <span class="op">&lt;-</span> <span class="fu">read_csv</span><span class="op">(</span><span class="fu">here</span><span class="op">(</span><span class="st">"data/Ahmedabad/dataset_Ahmedabad_2023.csv"</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="co">## filter to 1997-2011</span></span>
+<span></span>
+<span><span class="va">ahm_rh</span> <span class="op">&lt;-</span> <span class="fu">compute_correlations</span><span class="op">(</span><span class="va">df</span>, <span class="st">"hadISD"</span>, <span class="fl">2011</span>, <span class="st">"Ahmedabad"</span><span class="op">)</span></span>
+<span><span class="va">ahm_max_temp</span> <span class="op">&lt;-</span> <span class="fu">compute_correlations</span><span class="op">(</span><span class="va">df</span>, <span class="st">"Max_Temp"</span>, <span class="fl">2011</span>, <span class="st">"Ahmedabad"</span><span class="op">)</span></span>
+<span><span class="va">ahm_mean_temp</span> <span class="op">&lt;-</span> <span class="fu">compute_correlations</span><span class="op">(</span><span class="va">df</span>, <span class="st">"Mean_Temp"</span>, <span class="fl">2011</span>, <span class="st">"Ahmedabad"</span><span class="op">)</span></span>
+<span><span class="va">ahm_min_temp</span> <span class="op">&lt;-</span> <span class="fu">compute_correlations</span><span class="op">(</span><span class="va">df</span>, <span class="st">"Min_Temp"</span>, <span class="fl">2011</span>, <span class="st">"Ahmedabad"</span><span class="op">)</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</div>
+</section><section id="surat-correlations" class="level2"><h2 class="anchored" data-anchor-id="surat-correlations">Surat Correlations</h2>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb3"><pre class="downlit sourceCode r code-with-copy"><code class="sourceCode R"><span><span class="va">df</span> <span class="op">&lt;-</span> <span class="fu">read_csv</span><span class="op">(</span><span class="fu">here</span><span class="op">(</span><span class="st">"data/Surat/dataset_Surat_2023.csv"</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="co">## filter to 1997-2016</span></span>
+<span></span>
+<span><span class="va">surat_rh</span> <span class="op">&lt;-</span> <span class="fu">compute_correlations</span><span class="op">(</span><span class="va">df</span>, <span class="st">"hadISD"</span>, <span class="fl">2016</span>, <span class="st">"Surat"</span><span class="op">)</span></span>
+<span><span class="va">surat_max_temp</span> <span class="op">&lt;-</span> <span class="fu">compute_correlations</span><span class="op">(</span><span class="va">df</span>, <span class="st">"Max_Temp"</span>, <span class="fl">2016</span>, <span class="st">"Surat"</span><span class="op">)</span></span>
+<span><span class="va">surat_mean_temp</span> <span class="op">&lt;-</span> <span class="fu">compute_correlations</span><span class="op">(</span><span class="va">df</span>, <span class="st">"Mean_Temp"</span>, <span class="fl">2016</span>, <span class="st">"Surat"</span><span class="op">)</span></span>
+<span><span class="va">surat_min_temp</span> <span class="op">&lt;-</span> <span class="fu">compute_correlations</span><span class="op">(</span><span class="va">df</span>, <span class="st">"Min_Temp"</span>, <span class="fl">2016</span>, <span class="st">"Surat"</span><span class="op">)</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</div>
+</section><section id="plot" class="level2"><h2 class="anchored" data-anchor-id="plot">Plot</h2>
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure"><p><img src="climate_correlations_files/figure-html/unnamed-chunk-3-1.png" class="img-fluid figure-img" width="768"></p>
+</figure>
+</div>
+</div>
+</div>
 
-</main> <!-- /main -->
-<script id="quarto-html-after-body" type="application/javascript">
+
+</section></main><!-- /main --><script id="quarto-html-after-body" type="application/javascript">
   window.document.addEventListener("DOMContentLoaded", function (event) {
     const icon = "";
     const anchorJS = new window.AnchorJS();
@@ -960,7 +969,6 @@ Logical; if <code>TRUE</code> outliers are removed using an absolute z-score thr
   });
   </script>
 </div> <!-- /content -->
-
 
 
 

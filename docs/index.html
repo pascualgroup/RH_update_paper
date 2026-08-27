@@ -170,6 +170,12 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
       <ul id="quarto-sidebar-section-1" class="collapse list-unstyled sidebar-section depth1 ">  
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
+  <a href="./vignettes/climate_correlations.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Correlation plots</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
   <a href="./vignettes/create_profile_grids.pdf" class="sidebar-item-text sidebar-link">
  <span class="menu-text">create_profile_grids</span></a>
   </div>
@@ -659,8 +665,11 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </section>
 <section id="documentation-site" class="level2">
 <h2 class="anchored" data-anchor-id="documentation-site">Documentation site</h2>
-<p>Function reference (from roxygen2) and the vignettes above are built into a static site with <a href="https://altdoc.etiennebacher.com/">altdoc</a>:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb7"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a>altdoc<span class="sc">::</span><span class="fu">render_docs</span>()</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>Function reference (from roxygen2) and the vignettes above are built into a static site with <a href="https://altdoc.etiennebacher.com/">altdoc</a>, published at <a href="https://pascualgroup.github.io/RH_update_paper/" class="uri">https://pascualgroup.github.io/RH_update_paper/</a> (served from <code>docs/</code> on <code>main</code> via GitHub Pages, so <code>docs/</code> is committed rather than gitignored).</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb7"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a>altdoc<span class="sc">::</span><span class="fu">render_docs</span>(<span class="at">freeze =</span> <span class="cn">TRUE</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>Always pass <code>freeze = TRUE</code>: it skips re-knitting any vignette or man page that hasn’t changed since the last render (hashes are cached in <code>altdoc/freeze.rds</code>, itself gitignored/machine-local), so adding one new vignette only executes that vignette instead of re-running the whole pipeline — several of these vignettes are expensive (real <code>pomp</code> fitting) or memory-heavy enough to be impractical to rebuild on every change. Without <code>freeze = TRUE</code> (the plain <code>altdoc::render_docs()</code> default), everything is re-rendered from scratch every time.</p>
+<p>If you change a function in <code>R/</code> that a vignette depends on, the freeze cache won’t know to invalidate that vignette (it only hashes the vignette’s own source) — delete <code>altdoc/freeze.rds</code>, or render that vignette on its own with <code>quarto render vignettes/&lt;name&gt;.qmd --execute</code>, to force a refresh. Remember to run <code>devtools::document()</code> first if you changed any roxygen comments, so the reference pages pick up the change.</p>
+<p>After rendering, push <code>docs/</code> along with your other changes to update the published site.</p>
 
 
 </section>

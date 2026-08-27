@@ -595,7 +595,7 @@ all_df <- bind_rows(
   ungroup() |>
   mutate(
     type = case_when(
-      city == "Surat" & year <= 2015 ~ "a",
+      city == "Surat" & year <= 2016 ~ "a",
       city == "Surat" & year <= 2018 ~ "b",
       city == "Surat" ~ "c",
       city == "Ahmedabad" & year <= 2011 ~ "a",

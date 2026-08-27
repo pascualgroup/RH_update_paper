@@ -3,9 +3,6 @@ title: "Correlation plots"
 author: "Leonardo Souto Ferreira"
 date: today
 format: html
-knitr:
-  opts_knit:
-    root.dir: "/home/leonardo/Doutorado/RH_update_paper/"
 geometry:
   - margin=2cm
 warning: false
@@ -19,6 +16,9 @@ fig-height: 4
 
 ```{r setup, include=FALSE, message=FALSE}
 knitr::opts_chunk$set(autodep = TRUE)
+proj_root <- rprojroot::find_root(rprojroot::has_file("DESCRIPTION"))
+setwd(proj_root)
+knitr::opts_knit$set(root.dir = proj_root)
 library(tidyverse)
 library(here)
 ```

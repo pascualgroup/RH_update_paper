@@ -1,0 +1,384 @@
+---
+title: "Malaria suitability plots"
+author: "Leonardo Souto Ferreira"
+date: today
+format: html
+geometry:
+  - margin=2cm
+warning: false
+message: false
+echo: false
+fig-width: 8
+fig-height: 4
+---
+
+
+
+```{r setup, include=FALSE, message=FALSE}
+knitr::opts_chunk$set(autodep = TRUE)
+proj_root <- rprojroot::find_root(rprojroot::has_file("DESCRIPTION"))
+setwd(proj_root)
+knitr::opts_knit$set(root.dir = proj_root)
+library(tidyverse)
+library(here)
+library(zoo)
+library(ggtext)
+library(RColorBrewer)
+library(colorspace)
+
+```
+
+```{r helpers}
+
+make_briere_sample <- function(x, Temp = seq(0, 50, length.out = 100)) {
+  b <- rep(as.numeric(x["b"]), length(Temp))
+  T0 <- rep(as.numeric(x["T0"]), length(Temp))
+  Tm <- rep(as.numeric(x["Tm"]), length(Temp))
+  value <- b * Temp * (Temp - T0) * (Temp > T0) * sqrt((Tm - Temp) * (Temp < Tm))
+  result <- tibble(Temp = Temp, value = value)
+  result <- result %>%
+    mutate(value = if_else(Temp < T0, 0, value)) %>%
+    mutate(value = if_else(Temp > Tm, 0, value))
+  colnames(result) <- c("Temp", "value")
+  return(result)
+}
+
+make_quad_sample <- function(x, Temp = seq(0, 50, length.out = 100)) {
+  b <- rep(as.numeric(x["b"]), length(Temp))
+  T0 <- rep(as.numeric(x["T0"]), length(Temp))
+  Tm <- rep(as.numeric(x["Tm"]), length(Temp))
+  value <- -exp(b) * (Temp - T0) * (Temp - Tm) * (Temp < Tm) * (Temp > T0)
+  result <- tibble(Temp = Temp, value = value)
+  colnames(result) <- c("Temp", "value")
+  return(result)
+}
+
+make_quad_mu_sample <- function(x, Temp = seq(0, 50, length.out = 100)) {
+  b <- rep(as.numeric(x["b"]), length(Temp))
+  inter <- rep(as.numeric(x["inter"]), length(Temp))
+  slope <- rep(as.numeric(x["slope"]), length(Temp))
+  value <- inter - slope * Temp + b * Temp * Temp
+  result <- tibble(Temp = Temp, value = value)
+  colnames(result) <- c("Temp", "value")
+  return(result)
+}
+
+
+
+compute_VC <- function(a, pdr, mdr, efd, bc, e2a, mu) {
+  ## Villena et al
+  VC <- a * a * bc * exp(-mu / pdr) * efd * e2a * mdr / (mu**3)
+  VC <- pmax(sqrt(VC), 0)
+
+  return(VC)
+}
+
+compute_trait_curve_v2 <- function(x, Temp = seq(10, 40, length.out = 100)) {
+  res <- switch(x$model,
+    "briere" = make_briere_sample(x$params, Temp = Temp),
+    "quad" = make_quad_sample(x$params, Temp = Temp),
+    "quad_mu" = make_quad_mu_sample(x$params, Temp = Temp)
+  )
+  res <- res$value
+  return(res)
+}
+model_params <- tibble(
+  parameter = c("a", "pdr", "mdr", "efd", "bc.succ", "e2a", "mu"),
+  model = c("briere", "briere", "briere", "quad", "quad", "quad", "quad_mu")
+)
+df_to_vector_param_2 <- function(x) {
+  x <- list(params = setNames(x$median, x$param), model = unique(x$model))
+  return(x)
+}
+
+compute_VC_station <- function(x, y) {
+  temperature <- x |> pull(temp)
+  dates <- x |> pull(date)
+  result <- point_est |>
+    lapply(compute_trait_curve_v2, Temp = temperature) |>
+    bind_cols() |>
+    mutate(Temp = temperature, date = dates) |>
+    mutate(VC = compute_VC(a, pdr, mdr, efd, bc.succ, e2a, mu)) |>
+    select(date, Temp, VC) |>
+    cbind(y) |>
+    as_tibble()
+
+  return(result)
+}
+
+create_replicate <- function(x, y) {
+  x |>
+    slice_sample(n = 7) |>
+    summarize(VC = mean(VC, na.rm = TRUE)) |>
+    bind_cols(y) -> result
+  return(result)
+}
+```
+
+```{r}
+data <- read_csv(here::here("data/point_estimate_params.csv"))
+point_est <- data |>
+  left_join(model_params) |>
+  split(~parameter) |>
+  lapply(df_to_vector_param_2)
+
+df_filtered <- read_csv(here("data/filtered_endemic_states_data.csv"))
+head(df_filtered)
+```
+
+## Compute VC per station
+
+```{r}
+VC_per_station <- df_filtered |>
+  group_by(state, name, id) |>
+  group_map(compute_VC_station) |>
+  bind_rows()
+
+head(VC_per_station)
+
+
+VC_per_station <- VC_per_station |>
+  # filter(month(date) >= 5, month(date) <= 9) |>
+  group_by(id, state, name, year = year(date)) |>
+  summarize(VC = exp(mean(log(VC + 1), na.rm = TRUE))) |>
+  mutate(date = make_date(year))
+
+baseline_per_station <- VC_per_station |>
+  filter(year <= 2011)
+
+replicated_data <- replicate(1000, baseline_per_station |>
+  group_by(id, name, state) |>
+  group_map(create_replicate) |>
+  bind_rows(), simplify = FALSE) |>
+  bind_rows(.id = "sample")
+
+comparison_per_station <- VC_per_station |>
+  filter(year >= 2012, year <= 2018) |>
+  group_by(id, name, state) |>
+  summarize(VC = mean(VC, na.rm = TRUE))
+
+replicated_data |>
+  mutate(name = stringr::str_to_title(name)) |>
+  filter(!(name %in% c("Bhuj", "Rajkot", "Daltonganj"))) |>
+  mutate(
+    name = factor(name, levels = c("Balasore", "Bhubaneshwar", "Jharsuguda", "Birsa Munda", "Jamshedpur", "Jagdalpur", "Pbo Raipur", "Pendra Road", "Swami Vivekananda")),
+    state = factor(state, levels = c("Odisha", "Jharkhand", "Chhattisgarh"))
+  ) |>
+  ggplot(aes(x = VC, fill = state)) +
+  facet_wrap(~name) +
+  geom_histogram() +
+  geom_vline(aes(xintercept = VC), data = comparison_per_station |>
+    mutate(name = stringr::str_to_title(name)) |>
+    filter(!(name %in% c("Bhuj", "Rajkot", "Daltonganj"))) |>
+    mutate(
+      name = factor(name, levels = c("Balasore", "Bhubaneshwar", "Jharsuguda", "Birsa Munda", "Jamshedpur", "Jagdalpur", "Pbo Raipur", "Pendra Road", "Swami Vivekananda")),
+      state = factor(state, levels = c("Odisha", "Jharkhand", "Chhattisgarh"))
+    )) +
+  scale_fill_manual(values = c(
+    Odisha = "#0072B2", Jharkhand = "#009E73", Chhattisgarh = "#CC79A7"
+  )) +
+  theme_minimal(
+    base_size = 7, base_family = "sans"
+  ) +
+  theme(axis.line = element_line(color = "black")) +
+  theme(
+    legend.position = "bottom",
+    legend.box.spacing = margin(-1, 0, 0, 0),
+    panel.grid.minor = element_blank(),
+    text = element_text(family = "Helvetica")
+  ) +
+  labs(x = "Malaria Suitability Index", y = "Count", fill = "State") +
+  theme(
+    legend.key.height = unit(10, "pt"),
+    legend.key.width = unit(10, "pt"),
+    plot.margin = margin(
+      t = 2, r = 10, b = 2, l = 2, # pt
+      unit = "pt"
+    )
+  )
+
+ggsave(here("figures/permutation_test_VC.pdf"), 
+dpi = 1000, width = 180, height = 90, unit = "mm")
+
+replicated_data |>
+  mutate(name = stringr::str_to_title(name)) |>
+  filter(!(name %in% c("Bhuj", "Rajkot", "Pbo Raipur"))) |>
+  filter(!(name %in% c("Bhuj", "Rajkot", "Daltonganj"))) |>
+  mutate(
+    name = factor(name, levels = c("Balasore", "Bhubaneshwar", "Jharsuguda", "Birsa Munda", "Jamshedpur", "Jagdalpur", "Pbo Raipur", "Pendra Road", "Swami Vivekananda")),
+    state = factor(state, levels = c("Odisha", "Jharkhand", "Chhattisgarh"))
+  ) |>
+  ggplot(aes(x = VC, fill = state)) +
+  facet_wrap(~name) +
+  geom_histogram() +
+  geom_vline(aes(xintercept = VC), data = comparison_per_station |>
+    mutate(name = stringr::str_to_title(name)) |>
+    filter(!(name %in% c("Bhuj", "Rajkot", "Daltonganj"))) |>
+    mutate(
+      name = factor(name, levels = c("Balasore", "Bhubaneshwar", "Jharsuguda", "Birsa Munda", "Jamshedpur", "Jagdalpur", "Pbo Raipur", "Pendra Road", "Swami Vivekananda")),
+      state = factor(state, levels = c("Odisha", "Jharkhand", "Chhattisgarh"))
+    )) +
+  scale_fill_manual(values = c(
+    Odisha = "#0072B2", Jharkhand = "#009E73", Chhattisgarh = "#CC79A7"
+  )) +
+  theme_minimal(
+    base_size = 7, base_family = "sans"
+  ) +
+  theme(axis.line = element_line(color = "black")) +
+  theme(
+    legend.position = "bottom",
+    legend.box.spacing = margin(-1, 0, 0, 0),
+    panel.grid.minor = element_blank(),
+    text = element_text(family = "Helvetica")
+  ) +
+  labs(x = "Malaria Suitability Index", y = "Count", fill = "State") +
+  theme(
+    legend.key.height = unit(10, "pt"),
+    legend.key.width = unit(10, "pt"),
+    plot.margin = margin(
+      t = 2, r = 10, b = 2, l = 2, # pt
+      unit = "pt"
+    )
+  )
+
+ggsave("permutation_test_VC2.pdf", dpi = 1000, width = 180, height = 90, unit = "mm")
+
+baseline_per_station |>
+  group_by(id, name, state) |>
+  mutate(mov_avg = rollapply(VC, 7, mean, na.rm = TRUE, align = "left", na.pad = TRUE)) |>
+  drop_na() |>
+  ungroup() |>
+  mutate(name = stringr::str_to_title(name)) |>
+  filter(!(name %in% c("Bhuj", "Rajkot", "Daltonganj"))) |>
+  mutate(
+    name = factor(name, levels = c("Balasore", "Bhubaneshwar", "Jharsuguda", "Birsa Munda", "Jamshedpur", "Jagdalpur", "Pbo Raipur", "Pendra Road", "Swami Vivekananda")),
+    state = factor(state, levels = c("Odisha", "Jharkhand", "Chhattisgarh"))
+  ) |>
+  ggplot(aes(x = mov_avg, fill = state)) +
+  facet_wrap(~name) +
+  geom_histogram() +
+  geom_vline(aes(xintercept = VC), data = comparison_per_station |>
+    mutate(name = stringr::str_to_title(name)) |>
+    filter(!(name %in% c("Bhuj", "Rajkot", "Daltonganj"))) |>
+    mutate(
+      name = factor(name, levels = c("Balasore", "Bhubaneshwar", "Jharsuguda", "Birsa Munda", "Jamshedpur", "Jagdalpur", "Pbo Raipur", "Pendra Road", "Swami Vivekananda")),
+      state = factor(state, levels = c("Odisha", "Jharkhand", "Chhattisgarh"))
+    )) +
+  scale_fill_manual(values = c(
+    Odisha = "#0072B2", Jharkhand = "#009E73", Chhattisgarh = "#CC79A7"
+  )) +
+  theme_minimal(
+    base_size = 7, base_family = "sans"
+  ) +
+  theme(axis.line = element_line(color = "black")) +
+  theme(
+    legend.position = "bottom",
+    legend.box.spacing = margin(-1, 0, 0, 0),
+    panel.grid.minor = element_blank(),
+    text = element_text(family = "Helvetica")
+  ) +
+  labs(x = "Malaria Suitability Index", y = "Count", fill = "State") +
+  theme(
+    legend.key.height = unit(10, "pt"),
+    legend.key.width = unit(10, "pt"),
+    plot.margin = margin(
+      t = 2, r = 10, b = 2, l = 2, # pt
+      unit = "pt"
+    )
+  )
+
+ggsave(here("figures/permutation_test_VC_ordered.pdf"), dpi = 1000, width = 180, height = 90, unit = "mm")
+
+
+comparison_per_station <- VC_per_station |>
+  filter(year >= 2019, year <= 2024) |>
+  group_by(id, name, state) |>
+  summarize(VC = mean(VC, na.rm = TRUE))
+replicated_data |>
+  mutate(name = stringr::str_to_title(name)) |>
+  filter(!(name %in% c("Bhuj", "Rajkot", "Daltonganj"))) |>
+  mutate(
+    name = factor(name, levels = c("Balasore", "Bhubaneshwar", "Jharsuguda", "Birsa Munda", "Jamshedpur", "Jagdalpur", "Pbo Raipur", "Pendra Road", "Swami Vivekananda")),
+    state = factor(state, levels = c("Odisha", "Jharkhand", "Chhattisgarh"))
+  ) |>
+  ggplot(aes(x = VC, fill = state)) +
+  facet_wrap(~name) +
+  geom_histogram() +
+  geom_vline(aes(xintercept = VC), data = comparison_per_station |>
+    mutate(name = stringr::str_to_title(name)) |>
+    filter(!(name %in% c("Bhuj", "Rajkot", "Daltonganj"))) |>
+    mutate(
+      name = factor(name, levels = c("Balasore", "Bhubaneshwar", "Jharsuguda", "Birsa Munda", "Jamshedpur", "Jagdalpur", "Pbo Raipur", "Pendra Road", "Swami Vivekananda")),
+      state = factor(state, levels = c("Odisha", "Jharkhand", "Chhattisgarh"))
+    )) +
+  scale_fill_manual(values = c(
+    Odisha = "#0072B2", Jharkhand = "#009E73", Chhattisgarh = "#CC79A7"
+  )) +
+  theme_minimal(
+    base_size = 7, base_family = "sans"
+  ) +
+  theme(axis.line = element_line(color = "black")) +
+  theme(
+    legend.position = "bottom",
+    legend.box.spacing = margin(-1, 0, 0, 0),
+    panel.grid.minor = element_blank(),
+    text = element_text(family = "Helvetica")
+  ) +
+  labs(x = "Malaria Suitability Index", y = "Count", fill = "State") +
+  theme(
+    legend.key.height = unit(10, "pt"),
+    legend.key.width = unit(10, "pt"),
+    plot.margin = margin(
+      t = 2, r = 10, b = 2, l = 2, # pt
+      unit = "pt"
+    )
+  )
+
+ggsave(here("figures/permutation_test_VC_2024.pdf"), , dpi = 1000, width = 180, height = 90, unit = "mm")
+
+baseline_per_station |>
+  group_by(id, name, state) |>
+  mutate(mov_avg = rollapply(VC, 7, mean, na.rm = TRUE, align = "left", na.pad = TRUE)) |>
+  drop_na() |>
+  ungroup() |>
+  mutate(name = stringr::str_to_title(name)) |>
+  filter(!(name %in% c("Bhuj", "Rajkot", "Daltonganj"))) |>
+  mutate(
+    name = factor(name, levels = c("Balasore", "Bhubaneshwar", "Jharsuguda", "Birsa Munda", "Jamshedpur", "Jagdalpur", "Pbo Raipur", "Pendra Road", "Swami Vivekananda")),
+    state = factor(state, levels = c("Odisha", "Jharkhand", "Chhattisgarh"))
+  ) |>
+  ggplot(aes(x = mov_avg, fill = state)) +
+  facet_wrap(~name) +
+  geom_histogram() +
+  geom_vline(aes(xintercept = VC), data = comparison_per_station |>
+    mutate(name = stringr::str_to_title(name)) |>
+    filter(!(name %in% c("Bhuj", "Rajkot", "Daltonganj"))) |>
+    mutate(
+      name = factor(name, levels = c("Balasore", "Bhubaneshwar", "Jharsuguda", "Birsa Munda", "Jamshedpur", "Jagdalpur", "Pbo Raipur", "Pendra Road", "Swami Vivekananda")),
+      state = factor(state, levels = c("Odisha", "Jharkhand", "Chhattisgarh"))
+    )) +
+  scale_fill_manual(values = c(
+    Odisha = "#0072B2", Jharkhand = "#009E73", Chhattisgarh = "#CC79A7"
+  )) +
+  theme_minimal(
+    base_size = 7, base_family = "sans"
+  ) +
+  theme(axis.line = element_line(color = "black")) +
+  theme(
+    legend.position = "bottom",
+    legend.box.spacing = margin(-1, 0, 0, 0),
+    panel.grid.minor = element_blank(),
+    text = element_text(family = "Helvetica")
+  ) +
+  labs(x = "Malaria Suitability Index", y = "Count", fill = "State") +
+  theme(
+    legend.key.height = unit(10, "pt"),
+    legend.key.width = unit(10, "pt"),
+    plot.margin = margin(
+      t = 2, r = 10, b = 2, l = 2, # pt
+      unit = "pt"
+    )
+  )
+
+ggsave(here("figures/permutation_test_VC_ordered_2024.pdf"), dpi = 1000, width = 180, height = 90, unit = "mm")
+```

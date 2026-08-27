@@ -399,7 +399,7 @@ ggsave("figures/figure_coherence.pdf", height = 120, width = 180, dpi = 600, uni
 
 # Figures 2 and 3: model predictions with best-fit parameters
 
-```{r, eval = FALSE}
+```{r, eval = TRUE}
 predict_from_profile <- function(filtered_res, city, covariate, end_year, window_start, window_end,
                                  dataset_path, k = 1) {
   filtered_res |>
@@ -501,7 +501,7 @@ ggsave(here::here("figures/figure3.pdf"), plot = p_surat, height = 70, width = 1
 
 # SM Figure, prediction from 2019 onwards Ahmedabad
 
-```{r, eval = FALSE}
+```{r, eval = TRUE}
 
 predict_from_profile_different_year <- function(filtered_res, city, covariate, end_year, actual_end_year, window_start, window_end,
                                                 dataset_path, k = 1) {
@@ -574,9 +574,9 @@ ggsave(here::here("figures/Surat_prediction_2019.pdf"), plot = p_surat, height =
 
 # Figure: scaled covariate windows
 
-```{r, eval = FALSE}
+```{r, eval = TRUE}
 covariate_window <- function(city, covariate, window_start, window_end) {
-  dat_df <- str_glue("data/{city}/dataset_{city}_2023.csv")
+  dat_df <- here::here(str_glue("data/{city}/dataset_{city}_2023.csv"))
   read_csv(dat_df) |>
     filter(month >= window_start, month <= window_end) |>
     group_by(year) |>
@@ -623,5 +623,5 @@ all_df |> ggplot(aes(x = year, y = mean_covariate, color = type, group = 1)) +
   ) +
   labs(x = "Year", y = "Scaled covariate")
 
-ggsave("figure_covariates.pdf", dpi = 600, width = 10, height = 7)
+ggsave(here::here("figures/figure_covariates.pdf"), dpi = 600, width = 10, height = 7)
 ```

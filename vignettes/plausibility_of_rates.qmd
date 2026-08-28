@@ -32,11 +32,11 @@ library(ggspatial)
 ```{r helpers}
 
 #' Read a profile-likelihood CSV, keep the acceptable region, get the
-#' best-fitting parameter set, simulate from it and label training vs.
-#' testing (prediction) periods.
+#' best-fitting parameter set, and particle-filter it (data-conditioned
+#' hidden states, not a blind simulation) over the full study period.
 fit_and_predict <- function(city, model, covariate_var, profile_file,
                             start_year, end_year, window_start, window_end,
-                            end_year_prediction = 2023, n_sims = 1000) {
+                            end_year_prediction = 2023, n_sims = 10) {
   all_res <- read_csv(profile_file, show_col_types = FALSE)
 
   # Some profile files carry extra bookkeeping columns (mode/profile_var/source_file)
@@ -51,22 +51,19 @@ fit_and_predict <- function(city, model, covariate_var, profile_file,
 
   top_params <- all_res |> get_top_sample(k = 1)
 
-  ## Simulate over the full interval instead of switching to a blind,
-  ## particle-filter-reseeded forecast at the fit's end_year: push the
-  ## training/simulation boundary out to (almost) end_year_prediction, and
-  ## pin `actual_end_year` to the original fit's end_year so the covariate
-  ## normalization still matches what the parameters were estimated against.
+  ## predict_model_filtered() always covers the full [start_year,
+  ## end_year_prediction] interval (no training/prediction split), so
+  ## end_year here just anchors the covariate normalization to the window
+  ## the parameters were actually fit on (actual_end_year defaults to it).
   top_params |>
-    predict_model_states(city,
+    predict_model_filtered(
       n_sims = n_sims,
       model = model, covariate = covariate_var,
       start_year = start_year, start_month = 1,
-      end_year = end_year_prediction - 1, end_month = 12,
+      end_year = end_year, end_month = 12,
       end_year_prediction = end_year_prediction, end_month_prediction = 12,
       window_start = window_start, window_end = window_end,
-      actual_end_year = end_year, actual_end_month = 12,
-      dataset = paste0("data/", city, "/dataset_", city, "_2023.csv"),
-      output_format = "data.frame"
+      dataset = paste0("data/", city, "/dataset_", city, "_2023.csv")
     ) |>
     mutate(city = city, covariate_var = covariate_var, model = model) |>
     mutate(covariate_var = if_else(model == "baseline", "Baseline", covariate_var)) |>
@@ -126,8 +123,9 @@ Shared look for the facet plots below, matching the minimal theme used
 across the manuscript figures (e.g. `theme_profile()` in
 `parameter_profiles.qmd`, `plot_prediction_panel()` in `new_figures.qmd`).
 The training/prediction split no longer means anything for these two plots
-(the models are now simulated over the full interval, see `fit_and_predict()`
-above), so both plots treat all rows as one continuous series.
+(the models are now particle-filtered — data-conditioned, not blindly
+simulated — over the full interval, see `fit_and_predict()` above), so both
+plots treat all rows as one continuous series.
 
 ```{r palette}
 CI <- 0.95
@@ -156,7 +154,7 @@ all_results |>
   facet_grid(cols = vars(covariate_var), rows = vars(city)) +
   ggdist::stat_lineribbon(.width = CI, linewidth = 0.7, color = line_color, fill = ribbon_color) +
   labs(x = "Time", y = "Susceptible fraction") +
-  theme_facets()
+  theme_facets(base_size = 16)
 
 ggsave(here::here("figures/prevalence_plots.pdf"), width = 14)
 ```
@@ -185,7 +183,7 @@ all_results |>
   stat_summary(fun = median, geom = "line", aes(group = 1), color = line_color, linewidth = 0.7) +
   scale_x_continuous(breaks = seq(1, 12, by = 2), labels = month.abb[seq(1, 12, by = 2)]) +
   labs(x = "Month", y = "Transmission rate") +
-  theme_facets() +
+  theme_facets(base_size = 16) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
 ggsave(here::here("figures/transmission_rate_plots.pdf"), width = 14)

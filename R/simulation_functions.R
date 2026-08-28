@@ -2010,6 +2010,123 @@ predict_model <- function(
 }
 
 
+#' Particle-filtered (data-conditioned) hidden states over the full study period
+#'
+#' Unlike [predict_model_states()]/[predict_model()], which *simulate* the
+#' model forward from its initial-condition parameters (an unconditional
+#' check on the fitted dynamics), this function reports hidden states drawn
+#' from `pomp::pfilter()`'s smoothing distribution: at every time point, the
+#' reported state values come from particles that have been reweighted
+#' against the observed case counts throughout the whole period. There is no
+#' training/prediction split — the covariate table's training and prediction
+#' halves (from [preprocess_data_prediction()]) are immediately recombined,
+#' so the particle filter runs continuously across the full
+#' `[start_year, end_year_prediction]` interval.
+#'
+#' `end_year`/`end_month` keep their [preprocess_data_prediction()] role of
+#' anchoring the covariate min/max normalization (via `actual_end_year`,
+#' which defaults to `end_year` when `NULL`) to a specific fit window, even
+#' though the filter itself always covers the full interval regardless of
+#' `end_year`'s value; pass the training-window end that was used when the
+#' parameters were originally estimated, so the covariate scale matches what
+#' they were fit against.
+#'
+#' @param parameters Named numeric vector or single-row data.frame/tibble
+#'   with parameter values.
+#' @param n_sims Integer. Number of independent draws from the smoothing
+#'   distribution (see Details) — computationally expensive, since each draw
+#'   requires its own full `pomp::pfilter()` pass.
+#' @param model Character. Short model name (used to locate
+#'   `pomp_object_<model>.R`).
+#' @param covariate Character. Covariate column name.
+#' @param start_year,start_month Integers. Start of the full interval.
+#' @param end_year,end_month Integers. Forwarded to
+#'   `preprocess_data_prediction()`; see Details for their role here.
+#' @param end_year_prediction,end_month_prediction Integers. End of the full
+#'   interval that gets particle-filtered.
+#' @param window_start,window_end Integers. Calendar months defining the
+#'   covariate averaging window.
+#' @param dataset Path to the city's dataset CSV.
+#' @param actual_end_year,actual_end_month Optional integers. Covariate
+#'   normalization anchor; defaults to `end_year`/`end_month` when `NULL`
+#'   (see Details).
+#' @param extra_cov Optional character vector of additional covariate names.
+#' @param Np Integer. Number of particles per `pfilter()` run.
+#'
+#' @details To obtain `n_sims` independent draws from the smoothing
+#' distribution, `pomp::pfilter()` is run `n_sims` separate times (each with
+#' `filter.traj = TRUE`), extracting one traced-back particle trajectory per
+#' run via `pomp::filter_traj()`. This is the statistically correct way to
+#' sample from the smoothing distribution (see `?pomp::filter_traj`) — it is
+#' *not* the same as running one `pfilter()` with `Np = n_sims` and reading
+#' off `n_sims` particles cross-sectionally at each time, which would not
+#' respect genealogy and would understate uncertainty (particle diversity
+#' collapses under repeated resampling).
+#'
+#' @return A data.frame with columns `.id` (draw index, or `"data"` for the
+#'   observed series), `time`, the state variables (`S1`, `E`, `I1`, `S2`,
+#'   `I2`, `K`, `F`, `W`, `cases`), the covariate/season columns
+#'   (`season1`...`season6`, `covariate`) for the draw rows, and `PF` for
+#'   the `.id == "data"` rows.
+#' @export
+predict_model_filtered <- function(
+  parameters, n_sims = 10,
+  model = "inf_exponent", covariate = "hadISD",
+  start_year = 1997, start_month = 1,
+  end_year, end_month = 12,
+  end_year_prediction = 2023, end_month_prediction = 12,
+  window_start, window_end,
+  dataset,
+  actual_end_year = NULL, actual_end_month = NULL,
+  extra_cov = NULL, Np = 1000
+) {
+  dat <- readr::read_csv(dataset, show_col_types = FALSE)
+
+  dat_list <- preprocess_data_prediction(
+    dat, model, covariate,
+    start_year, end_year,
+    start_month, end_month,
+    end_year_prediction, end_month_prediction,
+    window_start, window_end,
+    actual_end_year, actual_end_month, extra_cov
+  )
+  dat_full <- rbind(dat_list[[1]], dat_list[[2]])
+
+  if (tibble::is_tibble(parameters) || is.data.frame(parameters)) {
+    param <- as.numeric(parameters[1, ])
+    names(param) <- colnames(parameters)
+  } else {
+    param <- parameters
+  }
+
+  po <- prepare_pomp_model(model, param, dat_full, dat_full)
+
+  covariate_cols <- c(
+    "season1", "season2", "season3", "season4", "season5", "season6", "covariate"
+  )
+  covariate_lookup <- dat_full |>
+    dplyr::select(time, dplyr::any_of(covariate_cols)) |>
+    dplyr::distinct(time, .keep_all = TRUE)
+
+  observed <- dat_full |>
+    dplyr::select(time, PF) |>
+    dplyr::mutate(.id = "data")
+
+  draws <- lapply(seq_len(n_sims), function(i) {
+    pfout <- pomp::pfilter(po, params = param, Np = Np, filter.traj = TRUE)
+    pomp::filter_traj(pfout, format = "data.frame") |>
+      dplyr::select(-rep) |>
+      tidyr::pivot_wider(id_cols = time, names_from = name, values_from = value) |>
+      dplyr::mutate(.id = as.character(i))
+  })
+
+  dplyr::bind_rows(draws) |>
+    dplyr::left_join(covariate_lookup, by = "time") |>
+    dplyr::bind_rows(observed) |>
+    dplyr::arrange(.id, time)
+}
+
+
 #' Plot a training/prediction trajectory against observed data
 #'
 #' Takes output from `predict_model()`/`predict_model_states()` (a long data

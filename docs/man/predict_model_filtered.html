@@ -7,7 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
 
-<title>list_manifests – rhmalaria</title>
+<title>predict_model_filtered – rhmalaria</title>
 <style>
 code{white-space: pre-wrap;}
 span.smallcaps{font-variant: small-caps;}
@@ -102,7 +102,7 @@ ul.task-list li input[type="checkbox"] {
       <button type="button" class="quarto-btn-toggle btn" data-bs-toggle="collapse" role="button" data-bs-target=".quarto-sidebar-collapse-item" aria-controls="quarto-sidebar" aria-expanded="false" aria-label="Toggle sidebar navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
         <i class="bi bi-layout-text-sidebar-reverse"></i>
       </button>
-        <nav class="quarto-page-breadcrumbs" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="../man/bin_by_quantile.html">Reference</a></li><li class="breadcrumb-item"><a href="../man/list_manifests.html">list_manifests</a></li></ol></nav>
+        <nav class="quarto-page-breadcrumbs" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="../man/bin_by_quantile.html">Reference</a></li><li class="breadcrumb-item"><a href="../man/predict_model_filtered.html">predict_model_filtered</a></li></ol></nav>
         <a class="flex-grow-1" role="navigation" data-bs-toggle="collapse" data-bs-target=".quarto-sidebar-collapse-item" aria-controls="quarto-sidebar" aria-expanded="false" aria-label="Toggle sidebar navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">      
         </a>
     </div>
@@ -266,7 +266,7 @@ ul.task-list li input[type="checkbox"] {
 </li>
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
-  <a href="../man/list_manifests.html" class="sidebar-item-text sidebar-link active">
+  <a href="../man/list_manifests.html" class="sidebar-item-text sidebar-link">
  <span class="menu-text">list_manifests</span></a>
   </div>
 </li>
@@ -332,7 +332,7 @@ ul.task-list li input[type="checkbox"] {
 </li>
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
-  <a href="../man/predict_model_filtered.html" class="sidebar-item-text sidebar-link">
+  <a href="../man/predict_model_filtered.html" class="sidebar-item-text sidebar-link active">
  <span class="menu-text">predict_model_filtered</span></a>
   </div>
 </li>
@@ -473,20 +473,38 @@ ul.task-list li input[type="checkbox"] {
         
     <div class="quarto-code-links"><h2>Code Links</h2><ul><li><a href="undefined"><i class="bi bi-link-45deg"></i></a></li></ul></div></div>
 <!-- main -->
-<main class="content" id="quarto-document-content"><header id="title-block-header" class="quarto-title-block"><nav class="quarto-page-breadcrumbs quarto-title-breadcrumbs d-none d-lg-block" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="../man/bin_by_quantile.html">Reference</a></li><li class="breadcrumb-item"><a href="../man/list_manifests.html">list_manifests</a></li></ol></nav></header>
+<main class="content" id="quarto-document-content"><header id="title-block-header" class="quarto-title-block"><nav class="quarto-page-breadcrumbs quarto-title-breadcrumbs d-none d-lg-block" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="../man/bin_by_quantile.html">Reference</a></li><li class="breadcrumb-item"><a href="../man/predict_model_filtered.html">predict_model_filtered</a></li></ol></nav></header>
 
 
 
 
-<section id="list-per-task-manifest-files" class="level2 unnumbered">
-<h2 class="unnumbered anchored" data-anchor-id="list-per-task-manifest-files">List per-task manifest files</h2>
+<section id="particle-filtered-data-conditioned-hidden-states-over-the-full-study-period" class="level2 unnumbered">
+<h2 class="unnumbered anchored" data-anchor-id="particle-filtered-data-conditioned-hidden-states-over-the-full-study-period">Particle-filtered (data-conditioned) hidden states over the full study period</h2>
 <section id="description" class="level3">
 <h3 class="anchored" data-anchor-id="description">Description</h3>
-<p>Return the list of per-task manifest files created by workers. This is a small convenience used by aggregator scripts.</p>
+<p>Unlike <code>predict_model_states()</code>/<code>predict_model()</code>, which <em>simulate</em> the model forward from its initial-condition parameters (an unconditional check on the fitted dynamics), this function reports hidden states drawn from <code>pomp::pfilter()</code>’s smoothing distribution: at every time point, the reported state values come from particles that have been reweighted against the observed case counts throughout the whole period. There is no training/prediction split — the covariate table’s training and prediction halves (from <code>preprocess_data_prediction()</code>) are immediately recombined, so the particle filter runs continuously across the full <code style="white-space: pre;">[start_year, end_year_prediction]</code> interval.</p>
 </section>
 <section id="usage" class="level3">
 <h3 class="anchored" data-anchor-id="usage">Usage</h3>
-<pre><code class="language-R">list_manifests(dir = "manifests", pattern = "^manifest_.*\\.json\$")
+<pre><code class="language-R">predict_model_filtered(
+  parameters,
+  n_sims = 10,
+  model = "inf_exponent",
+  covariate = "hadISD",
+  start_year = 1997,
+  start_month = 1,
+  end_year,
+  end_month = 12,
+  end_year_prediction = 2023,
+  end_month_prediction = 12,
+  window_start,
+  window_end,
+  dataset,
+  actual_end_year = NULL,
+  actual_end_month = NULL,
+  extra_cov = NULL,
+  Np = 1000
+)
 </code></pre>
 </section>
 <section id="arguments" class="level3">
@@ -494,25 +512,110 @@ ul.task-list li input[type="checkbox"] {
 <table role="presentation">
 <tbody><tr>
 <td style="white-space: collapse; font-family: monospace; vertical-align: top">
-<code id="dir">dir</code>
+<code id="parameters">parameters</code>
 </td>
 <td>
-Directory to search (default: "manifests").
+Named numeric vector or single-row data.frame/tibble with parameter values.
 </td>
 </tr>
 <tr>
 <td style="white-space: collapse; font-family: monospace; vertical-align: top">
-<code id="pattern">pattern</code>
+<code id="n_sims">n_sims</code>
 </td>
 <td>
-Regex pattern used to match manifest filenames.
+Integer. Number of independent draws from the smoothing distribution (see Details) — computationally expensive, since each draw requires its own full <code>pomp::pfilter()</code> pass.
+</td>
+</tr>
+<tr>
+<td style="white-space: collapse; font-family: monospace; vertical-align: top">
+<code id="model">model</code>
+</td>
+<td>
+Character. Short model name (used to locate <code style="white-space: pre;">pomp_object_&lt;model&gt;.R</code>).
+</td>
+</tr>
+<tr>
+<td style="white-space: collapse; font-family: monospace; vertical-align: top">
+<code id="covariate">covariate</code>
+</td>
+<td>
+Character. Covariate column name.
+</td>
+</tr>
+<tr>
+<td style="white-space: collapse; font-family: monospace; vertical-align: top">
+<code id="start_year">start_year</code>, <code id="start_month">start_month</code>
+</td>
+<td>
+Integers. Start of the full interval.
+</td>
+</tr>
+<tr>
+<td style="white-space: collapse; font-family: monospace; vertical-align: top">
+<code id="end_year">end_year</code>, <code id="end_month">end_month</code>
+</td>
+<td>
+Integers. Forwarded to <code>preprocess_data_prediction()</code>; see Details for their role here.
+</td>
+</tr>
+<tr>
+<td style="white-space: collapse; font-family: monospace; vertical-align: top">
+<code id="end_year_prediction">end_year_prediction</code>, <code id="end_month_prediction">end_month_prediction</code>
+</td>
+<td>
+Integers. End of the full interval that gets particle-filtered.
+</td>
+</tr>
+<tr>
+<td style="white-space: collapse; font-family: monospace; vertical-align: top">
+<code id="window_start">window_start</code>, <code id="window_end">window_end</code>
+</td>
+<td>
+Integers. Calendar months defining the covariate averaging window.
+</td>
+</tr>
+<tr>
+<td style="white-space: collapse; font-family: monospace; vertical-align: top">
+<code id="dataset">dataset</code>
+</td>
+<td>
+Path to the city’s dataset CSV.
+</td>
+</tr>
+<tr>
+<td style="white-space: collapse; font-family: monospace; vertical-align: top">
+<code id="actual_end_year">actual_end_year</code>, <code id="actual_end_month">actual_end_month</code>
+</td>
+<td>
+Optional integers. Covariate normalization anchor; defaults to <code>end_year</code>/<code>end_month</code> when <code>NULL</code> (see Details).
+</td>
+</tr>
+<tr>
+<td style="white-space: collapse; font-family: monospace; vertical-align: top">
+<code id="extra_cov">extra_cov</code>
+</td>
+<td>
+Optional character vector of additional covariate names.
+</td>
+</tr>
+<tr>
+<td style="white-space: collapse; font-family: monospace; vertical-align: top">
+<code id="Np">Np</code>
+</td>
+<td>
+Integer. Number of particles per <code>pfilter()</code> run.
 </td>
 </tr>
 </tbody></table>
 </section>
+<section id="details" class="level3">
+<h3 class="anchored" data-anchor-id="details">Details</h3>
+<p><code>end_year</code>/<code>end_month</code> keep their <code>preprocess_data_prediction()</code> role of anchoring the covariate min/max normalization (via <code>actual_end_year</code>, which defaults to <code>end_year</code> when <code>NULL</code>) to a specific fit window, even though the filter itself always covers the full interval regardless of <code>end_year</code>’s value; pass the training-window end that was used when the parameters were originally estimated, so the covariate scale matches what they were fit against.</p>
+<p>To obtain <code>n_sims</code> independent draws from the smoothing distribution, <code>pomp::pfilter()</code> is run <code>n_sims</code> separate times (each with <code>filter.traj = TRUE</code>), extracting one traced-back particle trajectory per run via <code>pomp::filter_traj()</code>. This is the statistically correct way to sample from the smoothing distribution (see <code>?pomp::filter_traj</code>) — it is <em>not</em> the same as running one <code>pfilter()</code> with <code>Np = n_sims</code> and reading off <code>n_sims</code> particles cross-sectionally at each time, which would not respect genealogy and would understate uncertainty (particle diversity collapses under repeated resampling).</p>
+</section>
 <section id="value" class="level3">
 <h3 class="anchored" data-anchor-id="value">Value</h3>
-<p>Character vector of full paths (possibly empty).</p>
+<p>A data.frame with columns <code>.id</code> (draw index, or <code>“data”</code> for the observed series), <code>time</code>, the state variables (<code>S1</code>, <code>E</code>, <code>I1</code>, <code>S2</code>, <code>I2</code>, <code>K</code>, <code>F</code>, <code>W</code>, <code>cases</code>), the covariate/season columns (<code>season1</code>…<code>season6</code>, <code>covariate</code>) for the draw rows, and <code>PF</code> for the <code>.id == “data”</code> rows.</p>
 
 
 </section>

@@ -51,5 +51,6 @@ rsconnect/
 /param_grids/
 !*.zip
 altdoc/freeze.rds
+docs/freeze.rds
 _quarto/*
 !_quarto/_freeze/

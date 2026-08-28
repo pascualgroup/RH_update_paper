@@ -593,25 +593,14 @@
     ]
   },
   {
-    "objectID": "vignettes/parameter_profiles.html",
-    "href": "vignettes/parameter_profiles.html",
-    "title": "Parameter profiles",
+    "objectID": "vignettes/results_reffiting.html",
+    "href": "vignettes/results_reffiting.html",
+    "title": "Results yearly prediction",
     "section": "",
-    "text": "Parameter transforms\nAll four profile files were produced with the inf_exponent model, so the estimation-scale transform is the one defined in dynamical_model/fitting/pomp_object_inf_exponent.R (fed to pomp via parameter_trans(log=, logit=, barycentric=) in prepare_pomp_model()). MCAP’s loess/quadratic machinery assumes an approximately quadratic log-likelihood surface, which only holds on the scale the model was actually fit on — so profile CIs need to be computed after transforming to that scale, then mapped back to the natural scale for plotting.\nPlot conventions\nPoints are Monte Carlo log-likelihood evaluations; the blue curve is the MCAP-smoothed profile. The vermillion line/point mark the true MLE (the single best fit across the whole file, the same for every panel); the orange dashed lines mark the 95% MCAP confidence limits. Each panel’s label reads MLE [CI low, CI high] (Δ=delta): a &lt;/&gt; prefix on a bound means it’s just the edge of the explored range, not a real MCAP crossing (fit wasn’t concave, or too few points), and delta is the log-likelihood drop used to define the CI (NA when non-concave). The y-axis is log-likelihood relative to the true MLE, shared across panels; x-axes stay free per panel. Parameters are fit and profiled on their estimation scale (see “Parameter transforms” above) and shown here back-transformed; plot_profile_group_transformed() shows the estimation-scale version.\nHelper functions\nAhmedabad, relative humidity\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nAhmedabad, maximum temperature\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nSurat, relative humidity\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nSurat, maximum temperature",
+    "text": "# A tibble: 6 × 30\n   year sigOBS sigPRO muS2S1 muEI1 muI1S2 muI2S2   betaOUT    rho     tau    bH\n  &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;     &lt;dbl&gt;  &lt;dbl&gt;   &lt;dbl&gt; &lt;dbl&gt;\n1     1  0.138  0.140   2.06  23.7   10.6   1.99 0.0000577 0.0120 0.00619  1.51\n2     2  0.138  0.140   2.06  23.7   10.6   1.99 0.0000577 0.0120 0.00619  1.51\n3     3  0.138  0.140   2.06  23.7   10.6   1.99 0.0000577 0.0120 0.00619  1.51\n4     4  0.138  0.140   2.06  23.7   10.6   1.99 0.0000577 0.0120 0.00619  1.51\n5     5  0.138  0.140   2.06  23.7   10.6   1.99 0.0000577 0.0120 0.00619  1.51\n6     6  0.138  0.140   2.06  23.7   10.6   1.99 0.0000577 0.0120 0.00619  1.51\n# ℹ 19 more variables: q0 &lt;dbl&gt;, b1 &lt;dbl&gt;, b2 &lt;dbl&gt;, b3 &lt;dbl&gt;, b4 &lt;dbl&gt;,\n#   b5 &lt;dbl&gt;, b6 &lt;dbl&gt;, delta &lt;dbl&gt;, S1_0 &lt;dbl&gt;, E_0 &lt;dbl&gt;, I1_0 &lt;dbl&gt;,\n#   S2_0 &lt;dbl&gt;, I2_0 &lt;dbl&gt;, K_0 &lt;dbl&gt;, F_0 &lt;dbl&gt;, alpha &lt;dbl&gt;, scaled_b &lt;dbl&gt;,\n#   window &lt;dbl&gt;, rep &lt;dbl&gt;",
     "crumbs": [
       "Articles",
-      "Parameter profiles"
-    ]
-  },
-  {
-    "objectID": "vignettes/new_figures.html",
-    "href": "vignettes/new_figures.html",
-    "title": "Manuscript figures",
-    "section": "",
-    "text": "Figure 1: case time series, covariate correlations, and station map\n\n\n\n\n\n\n\n\nLoading basemap 'world_physical_map' from map service 'esri'...\n\n\n\n\n\n\n\n\nFigure: wavelet power spectra\n\n\n\n\n\n\n\n\nFigure: cross wavelet power\n\n\n\n\n\n\n\n\nFigure: wavelet coherence\n\n\n\n\n\n\n\n\nFigures 2 and 3: model predictions with best-fit parameters\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nSM Figure, prediction from 2019 onwards Ahmedabad\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nFigure: scaled covariate windows",
-    "crumbs": [
-      "Articles",
-      "Manuscript figures"
+      "Results yearly prediction"
     ]
   },
   {
@@ -659,14 +648,47 @@
     ]
   },
   {
-    "objectID": "vignettes/results_reffiting.html",
-    "href": "vignettes/results_reffiting.html",
-    "title": "Results yearly prediction",
+    "objectID": "vignettes/new_figures.html",
+    "href": "vignettes/new_figures.html",
+    "title": "Manuscript figures",
     "section": "",
-    "text": "# A tibble: 6 × 30\n   year sigOBS sigPRO muS2S1 muEI1 muI1S2 muI2S2   betaOUT    rho     tau    bH\n  &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;     &lt;dbl&gt;  &lt;dbl&gt;   &lt;dbl&gt; &lt;dbl&gt;\n1     1  0.138  0.140   2.06  23.7   10.6   1.99 0.0000577 0.0120 0.00619  1.51\n2     2  0.138  0.140   2.06  23.7   10.6   1.99 0.0000577 0.0120 0.00619  1.51\n3     3  0.138  0.140   2.06  23.7   10.6   1.99 0.0000577 0.0120 0.00619  1.51\n4     4  0.138  0.140   2.06  23.7   10.6   1.99 0.0000577 0.0120 0.00619  1.51\n5     5  0.138  0.140   2.06  23.7   10.6   1.99 0.0000577 0.0120 0.00619  1.51\n6     6  0.138  0.140   2.06  23.7   10.6   1.99 0.0000577 0.0120 0.00619  1.51\n# ℹ 19 more variables: q0 &lt;dbl&gt;, b1 &lt;dbl&gt;, b2 &lt;dbl&gt;, b3 &lt;dbl&gt;, b4 &lt;dbl&gt;,\n#   b5 &lt;dbl&gt;, b6 &lt;dbl&gt;, delta &lt;dbl&gt;, S1_0 &lt;dbl&gt;, E_0 &lt;dbl&gt;, I1_0 &lt;dbl&gt;,\n#   S2_0 &lt;dbl&gt;, I2_0 &lt;dbl&gt;, K_0 &lt;dbl&gt;, F_0 &lt;dbl&gt;, alpha &lt;dbl&gt;, scaled_b &lt;dbl&gt;,\n#   window &lt;dbl&gt;, rep &lt;dbl&gt;",
+    "text": "Figure 1: case time series, covariate correlations, and station map\n\n\n\n\n\n\n\n\nLoading basemap 'world_physical_map' from map service 'esri'...\n\n\n\n\n\n\n\n\nFigure: wavelet power spectra\n\n\n\n\n\n\n\n\nFigure: cross wavelet power\n\n\n\n\n\n\n\n\nFigure: wavelet coherence\n\n\n\n\n\n\n\n\nFigures 2 and 3: model predictions with best-fit parameters\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nSM Figure, prediction from 2019 onwards Ahmedabad\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nFigure: scaled covariate windows",
     "crumbs": [
       "Articles",
-      "Results yearly prediction"
+      "Manuscript figures"
+    ]
+  },
+  {
+    "objectID": "vignettes/parameter_profiles.html",
+    "href": "vignettes/parameter_profiles.html",
+    "title": "Parameter profiles",
+    "section": "",
+    "text": "Parameter transforms\nAll four profile files were produced with the inf_exponent model, so the estimation-scale transform is the one defined in dynamical_model/fitting/pomp_object_inf_exponent.R (fed to pomp via parameter_trans(log=, logit=, barycentric=) in prepare_pomp_model()). MCAP’s loess/quadratic machinery assumes an approximately quadratic log-likelihood surface, which only holds on the scale the model was actually fit on — so profile CIs need to be computed after transforming to that scale, then mapped back to the natural scale for plotting.\nPlot conventions\nPoints are Monte Carlo log-likelihood evaluations; the blue curve is the MCAP-smoothed profile. The vermillion line/point mark the true MLE (the single best fit across the whole file, the same for every panel); the orange dashed lines mark the 95% MCAP confidence limits. Each panel’s label reads MLE [CI low, CI high] (Δ=delta): a &lt;/&gt; prefix on a bound means it’s just the edge of the explored range, not a real MCAP crossing (fit wasn’t concave, or too few points), and delta is the log-likelihood drop used to define the CI (NA when non-concave). The y-axis is log-likelihood relative to the true MLE, shared across panels; x-axes stay free per panel. Parameters are fit and profiled on their estimation scale (see “Parameter transforms” above) and shown here back-transformed; plot_profile_group_transformed() shows the estimation-scale version.\nHelper functions\nAhmedabad, relative humidity\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nAhmedabad, maximum temperature\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nSurat, relative humidity\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nSurat, maximum temperature",
+    "crumbs": [
+      "Articles",
+      "Parameter profiles"
+    ]
+  },
+  {
+    "objectID": "vignettes/IRS_plot.html",
+    "href": "vignettes/IRS_plot.html",
+    "title": "IRS spraying vs. malaria cases",
+    "section": "",
+    "text": "Each point is one spraying round. Panels A-B pool all rounds together (one fit, one Pearson correlation); panels C-D repeat the same two relationships but group points, fit lines, and correlations by insecticide molecule.",
+    "crumbs": [
+      "Articles",
+      "IRS spraying vs. malaria cases"
+    ]
+  },
+  {
+    "objectID": "vignettes/IRS_plot.html#sprayed-dwellings-and-coverage-vs.-cases",
+    "href": "vignettes/IRS_plot.html#sprayed-dwellings-and-coverage-vs.-cases",
+    "title": "IRS spraying vs. malaria cases",
+    "section": "",
+    "text": "Each point is one spraying round. Panels A-B pool all rounds together (one fit, one Pearson correlation); panels C-D repeat the same two relationships but group points, fit lines, and correlations by insecticide molecule.",
+    "crumbs": [
+      "Articles",
+      "IRS spraying vs. malaria cases"
     ]
   },
   {

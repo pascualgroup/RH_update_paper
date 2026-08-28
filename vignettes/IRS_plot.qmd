@@ -1,0 +1,107 @@
+---
+title: "IRS spraying vs. malaria cases"
+author: "Leonardo Souto Ferreira"
+date: today
+format: html
+geometry:
+  - margin=2cm
+warning: false
+message: false
+echo: false
+fig-width: 10
+fig-height: 8
+---
+
+
+
+```{r setup, include=FALSE, message=FALSE}
+knitr::opts_chunk$set(autodep = TRUE)
+proj_root <- rprojroot::find_root(rprojroot::has_file("DESCRIPTION"))
+setwd(proj_root)
+knitr::opts_knit$set(root.dir = proj_root)
+pkgload::load_all(proj_root)
+library(tidyverse)
+library(here)
+library(patchwork)
+```
+
+```{r helpers}
+df_irs <- read_csv(here("data/IRS malaria Ahmedabad - IRS.csv")) |>
+  janitor::clean_names()
+df_cases <- read_csv(here("data/Ahmedabad/dataset_Ahmedabad_2023.csv")) |>
+  select(year, PF) |>
+  group_by(year) |>
+  summarize(cases = sum(PF))
+
+df_join <- df_irs |> left_join(df_cases, by = "year")
+
+# Okabe-Ito colorblind-safe palette, matching the manuscript figures
+# (new_figures.qmd, parameter_profiles.qmd).
+molecule_colors <- c(
+  "Alphacypermethrin 5% WP" = "#0072B2", # blue
+  "Lamdacyhalothrin 10% WP" = "#D55E00", # vermillion
+  "Lamdacyhalothrin 10 CS"  = "#009E73"  # bluish green
+)
+
+#' Shared look for the IRS scatter/lm plots, matching the minimal theme used
+#' across the manuscript figures.
+theme_irs <- function(base_size = 11) {
+  theme_minimal(base_size = base_size, base_family = "sans") +
+    theme(
+      axis.line = element_line(color = "black"),
+      panel.grid.minor = element_blank(),
+      text = element_text(family = "Helvetica")
+    )
+}
+```
+
+## Sprayed dwellings and % coverage vs. cases
+
+Each point is one spraying round. Panels A-B pool all rounds together (one
+fit, one Pearson correlation); panels C-D repeat the same two relationships
+but group points, fit lines, and correlations by insecticide molecule.
+
+```{r}
+p1 <- df_join |>
+  ggplot(aes(x = sprayed_dwellings, y = cases)) +
+  geom_smooth(method = "lm", color = "#0072B2", fill = "#0072B2", alpha = 0.15, linewidth = 0.7) +
+  geom_point(color = "#0072B2", size = 2) +
+  ggpubr::stat_cor(aes(label = paste(after_stat(r.label), after_stat(p.label), sep = "~`,`~")), method = "pearson", color = "black", size = 3.3) +
+  labs(x = "Sprayed dwellings", y = "Cases") +
+  theme_irs()
+
+p2 <- df_join |>
+  ggplot(aes(x = percent_dwellings_coverage_under_irs, y = cases)) +
+  geom_smooth(method = "lm", color = "#0072B2", fill = "#0072B2", alpha = 0.15, linewidth = 0.7) +
+  geom_point(color = "#0072B2", size = 2) +
+  ggpubr::stat_cor(aes(label = paste(after_stat(r.label), after_stat(p.label), sep = "~`,`~")), method = "pearson", color = "black", size = 3.3) +
+  labs(x = "% dwellings covered", y = "Cases") +
+  theme_irs()
+
+p3 <- df_join |>
+  ggplot(aes(x = sprayed_dwellings, y = cases, color = insecticide_molecule, fill = insecticide_molecule)) +
+  geom_smooth(method = "lm", alpha = 0.15, linewidth = 0.7) +
+  geom_point(size = 2) +
+  ggpubr::stat_cor(aes(label = paste(after_stat(r.label), after_stat(p.label), sep = "~`,`~")), method = "pearson", size = 2.8, show.legend = FALSE) +
+  scale_color_manual(values = molecule_colors) +
+  scale_fill_manual(values = molecule_colors) +
+  labs(x = "Sprayed dwellings", y = "Cases", color = "Insecticide molecule", fill = "Insecticide molecule") +
+  theme_irs()
+
+p4 <- df_join |>
+  ggplot(aes(x = percent_dwellings_coverage_under_irs, y = cases, color = insecticide_molecule, fill = insecticide_molecule)) +
+  geom_smooth(method = "lm", alpha = 0.15, linewidth = 0.7) +
+  geom_point(size = 2) +
+  ggpubr::stat_cor(aes(label = paste(after_stat(r.label), after_stat(p.label), sep = "~`,`~")), method = "pearson", size = 2.8, show.legend = FALSE) +
+  scale_color_manual(values = molecule_colors) +
+  scale_fill_manual(values = molecule_colors) +
+  labs(x = "% dwellings covered", y = "Cases", color = "Insecticide molecule", fill = "Insecticide molecule") +
+  theme_irs()
+
+(p1 | p2) / (p3 | p4) +
+  plot_layout(guides = "collect") +
+  plot_annotation(tag_levels = "A") &
+  theme(legend.position = "bottom")
+
+ggsave(here("figures/irs_vs_cases.pdf"), width = 11, height = 9, dpi = 600)
+```
